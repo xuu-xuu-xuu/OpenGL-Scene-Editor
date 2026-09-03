@@ -49,6 +49,7 @@ bool   gWireframe = false;
 bool   gImGuiReady = false;
 bool   gShowGrid = true;
 bool   gShowSky = true;
+bool gSunFollowLight = false;   // 天空太阳是否跟随第一盏灯
 const int kMaxLights = 8;
 
 struct SceneModel
@@ -1145,6 +1146,8 @@ void SidebarUI()
     ImGui::Checkbox("显示网格", &gShowGrid);
     ImGui::SameLine();
     ImGui::Checkbox("天空盒", &gShowSky);
+    ImGui::SameLine();
+    ImGui::Checkbox("太阳跟随光源", &gSunFollowLight);
     if (ImGui::Button("重置相机", ImVec2(-1, 0)))
     {
         gCamera = Camera();
@@ -1730,8 +1733,8 @@ GLsizei axesCount = (GLsizei)(axesData.size() / 6);
             skyShader.Use();
             skyShader.SetMat4("uView", view);
             skyShader.SetMat4("uProj", proj);
-            glm::vec3 sunDir(0.3f, 0.8f, 0.4f);
-            if (!gLights.empty())
+            glm::vec3 sunDir(0.3f, 0.8f, 0.4f);   // 默认：太阳固定不动
+            if (gSunFollowLight && !gLights.empty())
                 sunDir = glm::length(gLights[0].Position) > 0.01f ? glm::normalize(gLights[0].Position) : sunDir;
             skyShader.SetVec3("uSunDir", sunDir);
             glBindVertexArray(cubeVao);
