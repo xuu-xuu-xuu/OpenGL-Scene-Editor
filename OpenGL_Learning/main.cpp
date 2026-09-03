@@ -50,6 +50,7 @@ bool   gImGuiReady = false;
 bool   gShowGrid = true;
 bool   gShowSky = true;
 bool gSunFollowLight = false;   // 天空太阳是否跟随第一盏灯
+bool gToon = true;   // 卡通/赛璐璐着色开关
 const int kMaxLights = 8;
 
 struct SceneModel
@@ -138,6 +139,7 @@ out vec4 FragColor;
 uniform vec3 uColor;
 uniform vec3 uViewPos;
 uniform float uShininess;
+uniform float uToon;
 const int kMaxLights = 8;
 uniform int uLightCount;
 uniform vec3 uLightPos[kMaxLights];
@@ -156,10 +158,21 @@ void main()
         vec3 H = normalize(L + V);
         float dist  = length(uLightPos[i] - vWorldPos);
         float atten = 1.0f / (1.0f + 0.09f * dist + 0.05f * dist * dist);
-        float diff = max(dot(N, L), 0.0);
-        float spec = pow(max(dot(N, H), 0.0), uShininess);
+        float ndl = max(dot(N, L), 0.0);
+        float diff = ndl;
+        if (uToon > 0.5f)
+        {
+            // 三段式卡通阴影（亮/中/暗 + 极暗保持轮廓感）
+            diff = (ndl > 0.85f) ? 1.0f
+                 : (ndl > 0.35f) ? 0.72f
+                 : (ndl > 0.08f) ? 0.34f : 0.10f;
+        }
+        float ndh = max(dot(N, H), 0.0);
+        float spec = pow(ndh, uShininess);
+        if (uToon > 0.5f)
+            spec = smoothstep(0.30f, 0.42f, ndh) * pow(ndh, 160.0f);   // 锐利高光块
         vec3 radiance = uLightColor[i] * uLightIntensity[i] * atten;
-        result += radiance * (diff * uColor + spec * vec3(0.6f));
+        result += radiance * (diff * uColor + spec * vec3(0.9f));
     }
     FragColor = vec4(result, 1.0);
 }
@@ -1148,6 +1161,7 @@ void SidebarUI()
     ImGui::Checkbox("天空盒", &gShowSky);
     ImGui::SameLine();
     ImGui::Checkbox("太阳跟随光源", &gSunFollowLight);
+    ImGui::Checkbox("卡通着色", &gToon);
     if (ImGui::Button("重置相机", ImVec2(-1, 0)))
     {
         gCamera = Camera();
@@ -1616,6 +1630,7 @@ GLsizei axesCount = (GLsizei)(axesData.size() / 6);
         worldShader.SetMat4("uView", view);
         worldShader.SetMat4("uProj", proj);
         worldShader.SetVec3("uViewPos", gCamera.Position);
+        worldShader.SetFloat("uToon", gToon ? 1.0f : 0.0f);
 
         int lightCount = (int)gLights.size();
         if (lightCount > kMaxLights) lightCount = kMaxLights;
