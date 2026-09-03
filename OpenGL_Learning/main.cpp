@@ -52,6 +52,7 @@ bool   gShowSky = true;
 bool gSunFollowLight = false;   // 天空太阳是否跟随第一盏灯
 bool gToon = true;   // 卡通/赛璐璐着色开关
 bool gOutline = true;   // 屏幕空间黑色描边开关
+bool gGrade = true;   // 后期调色（降饱和/抬黑位/暗角）
 const int kMaxLights = 8;
 
 struct SceneModel
@@ -285,6 +286,7 @@ out vec4 FragColor;
 uniform sampler2D uScene;
 uniform sampler2D uDepth;
 uniform float uOutlineOn;
+uniform float uGradeOn;
 
 float toLinear(float z)
 {
@@ -1214,6 +1216,7 @@ void SidebarUI()
     ImGui::Checkbox("太阳跟随光源", &gSunFollowLight);
     ImGui::Checkbox("卡通着色", &gToon);
     ImGui::Checkbox("黑色描边", &gOutline);
+    ImGui::Checkbox("后期调色", &gGrade);
     if (ImGui::Button("重置相机", ImVec2(-1, 0)))
     {
         gCamera = Camera();
@@ -1858,6 +1861,7 @@ GLsizei axesCount = (GLsizei)(axesData.size() / 6);
             postShader.SetInt("uScene", 0);
             postShader.SetInt("uDepth", 1);
             postShader.SetFloat("uOutlineOn", gOutline ? 1.0f : 0.0f);
+            postShader.SetFloat("uGradeOn", gGrade ? 1.0f : 0.0f);
             glBindVertexArray(gPostVao);
             glDrawArrays(GL_TRIANGLES, 0, 3);
             glBindVertexArray(0);
