@@ -1482,6 +1482,19 @@ GLsizei axesCount = (GLsizei)(axesData.size() / 6);
         if (dt > 0.05f) dt = 0.05f;
         glfwPollEvents();   // 先处理事件，保证 ImGui 输入及时
 
+        // Alt：强制呼出鼠标光标（右键转视角后光标卡住/丢失时使用）
+        static bool prevAlt = false;
+        bool nowAlt = (glfwGetKey(window, GLFW_KEY_LEFT_ALT) == GLFW_PRESS) ||
+                      (glfwGetKey(window, GLFW_KEY_RIGHT_ALT) == GLFW_PRESS);
+        if (nowAlt && !prevAlt)
+        {
+            glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
+            gRightMouseDown = false;
+            gFirstMouse = true;
+            std::cout << "[提示] 已呼出鼠标光标（Alt）" << std::endl;
+        }
+        prevAlt = nowAlt;
+
         if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS)
             glfwSetWindowShouldClose(window, true);
 
