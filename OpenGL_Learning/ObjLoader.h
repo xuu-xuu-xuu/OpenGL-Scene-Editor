@@ -1,16 +1,7 @@
 ﻿#pragma once
 // ============================================================
-// ObjLoader.h —— 极简 OBJ 模型加载器
-//
-// 支持的 OBJ 语法：
-//   v  x y z        （顶点位置）
-//   vn x y z        （顶点法线）
-//   f 1//1 2//2 3//3  或  f 1/1/1 2/2/1 3/3/1  或  f 1 2 3
-//
-// 特性：
-//   - 没有法线的模型会自动生成“平面法线”（每个面一个方向）
-//   - 多边形面会自动三角化
-//   - 输出交错的 position+normal 顶点数组，直接 glDrawArrays
+// ObjLoader.h —— OBJ 加载器（支持 v / vn / vt / f）
+// 输出交错顶点：位置(3) + 法线(3) + UV(2)，每 8 个 float 一个顶点
 // ============================================================
 
 #include <glm/glm.hpp>
@@ -24,7 +15,7 @@
 struct ObjModel
 {
     bool Loaded = false;
-    std::vector<float> Data;   // 交错数据：x,y,z,nx,ny,nz（每 6 个 float = 1 个顶点）
+    std::vector<float> Data;   // x,y,z, nx,ny,nz, u,v
     unsigned int VertexCount = 0;
     glm::vec3 BoundsMin = glm::vec3(0.0f);
     glm::vec3 BoundsMax = glm::vec3(0.0f);
@@ -38,14 +29,16 @@ inline bool LoadObjFile(const std::string& path, ObjModel& out)
     std::ifstream file(path);
     if (!file.is_open()) return false;
 
-    std::vector<glm::vec3> positions;                    // OBJ 里所有 v
-    std::vector<glm::vec3> normals;                      // OBJ 里所有 vn
-    std::vector<std::pair<std::vector<int>, std::vector<int>>> faces;  // (顶点下标表, 法线下标表)
+    std::vector<glm::vec3> positions;
+    std::vector<glm::vec3> normals;
+    std::vector<glm::vec2> texcoords;
+    struct Face { std::vector<int> p, n, t; };
+    std::vector<Face> faces;
 
     std::string line;
     while (std::getline(file, line))
     {
-        if (!line.empty() && line.back() == '\r') line.pop_back();  // 兼容 CRLF 换行
+        if (!line.empty() && line.back() == '\r') line.pop_back();
         std::istringstream ss(line);
         std::string type;
         ss >> type;
@@ -60,40 +53,41 @@ inline bool LoadObjFile(const std::string& path, ObjModel& out)
             float x, y, z;
             if (ss >> x >> y >> z) normals.push_back(glm::vec3(x, y, z));
         }
+        else if (type == "vt")
+        {
+            float u = 0.0f, v = 0.0f;
+            ss >> u >> v;
+            texcoords.push_back(glm::vec2(u, v));
+        }
         else if (type == "f")
         {
-            std::vector<int> pi;   // 本面的顶点下标（0-based）
-            std::vector<int> ni;   // 本面的法线下标（没有则为 -1）
-            std::string token;
-            while (ss >> token)
+            Face f;
+            std::string tok;
+            while (ss >> tok)
             {
-                // token 可能是: "7"  "7//7"  "7/1/7"
-                size_t first = token.find('/');
-                int pidx = -1, nidx = -1;
-
-                std::string posStr = (first == std::string::npos) ? token : token.substr(0, first);
-                if (!posStr.empty()) pidx = std::atoi(posStr.c_str()) - 1;   // OBJ 从 1 开始数
-
-                if (first != std::string::npos)
+                int pi = -1, ni = -1, ti = -1;
+                size_t s1 = tok.find('/');
+                std::string a = (s1 == std::string::npos) ? tok : tok.substr(0, s1);
+                if (!a.empty()) pi = std::atoi(a.c_str()) - 1;
+                if (s1 != std::string::npos)
                 {
-                    size_t second = token.find('/', first + 1);
-                    if (second != std::string::npos && second + 1 < token.size())
+                    size_t s2 = tok.find('/', s1 + 1);
+                    std::string b = tok.substr(s1 + 1, s2 == std::string::npos ? std::string::npos : s2 - s1 - 1);
+                    if (!b.empty()) ti = std::atoi(b.c_str()) - 1;
+                    if (s2 != std::string::npos && s2 + 1 < tok.size())
                     {
-                        std::string nStr = token.substr(second + 1);
-                        if (!nStr.empty()) nidx = std::atoi(nStr.c_str()) - 1;
+                        std::string c = tok.substr(s2 + 1);
+                        if (!c.empty()) ni = std::atoi(c.c_str()) - 1;
                     }
                 }
-
-                if (pidx >= 0 && pidx < (int)positions.size())
+                if (pi >= 0 && pi < (int)positions.size())
                 {
-                    pi.push_back(pidx);
-                    ni.push_back(nidx);
+                    f.p.push_back(pi);
+                    f.n.push_back(ni);
+                    f.t.push_back(ti);
                 }
             }
-            if (pi.size() >= 3)
-            {
-                faces.push_back(std::make_pair(pi, ni));
-            }
+            if (f.p.size() >= 3) faces.push_back(f);
         }
     }
 
@@ -103,58 +97,54 @@ inline bool LoadObjFile(const std::string& path, ObjModel& out)
     out.BoundsMin = positions[0];
     out.BoundsMax = positions[0];
 
-    auto pushVertex = [&](const glm::vec3& pos, const glm::vec3& nrm)
+    auto pushVertex = [&](int pi, const glm::vec3& n, int ti)
     {
-        out.Data.push_back(pos.x); out.Data.push_back(pos.y); out.Data.push_back(pos.z);
-        out.Data.push_back(nrm.x); out.Data.push_back(nrm.y); out.Data.push_back(nrm.z);
-        out.BoundsMin = glm::min(out.BoundsMin, pos);
-        out.BoundsMax = glm::max(out.BoundsMax, pos);
+        const glm::vec3& p = positions[pi];
+        glm::vec2 uv(0.0f);
+        if (ti >= 0 && ti < (int)texcoords.size()) uv = texcoords[ti];
+        out.Data.push_back(p.x); out.Data.push_back(p.y); out.Data.push_back(p.z);
+        out.Data.push_back(n.x); out.Data.push_back(n.y); out.Data.push_back(n.z);
+        out.Data.push_back(uv.x); out.Data.push_back(uv.y);
+        out.BoundsMin = glm::min(out.BoundsMin, p);
+        out.BoundsMax = glm::max(out.BoundsMax, p);
     };
 
-    for (auto& face : faces)
+    for (Face& f : faces)
     {
-        const std::vector<int>& pi = face.first;
-        const std::vector<int>& ni = face.second;
-        int count = (int)pi.size();
-
-        // 是否所有顶点都带法线；有缺失就用“平面法线”代替
+        int count = (int)f.p.size();
         bool hasNormals = true;
-        for (int n : ni)
-        {
+        for (int n : f.n)
             if (n < 0 || n >= (int)normals.size()) { hasNormals = false; break; }
-        }
 
-        // 平面法线 = 面的前三个顶点叉积得到的方向（没有法线信息时使用）
         glm::vec3 flatN(0.0f);
         if (!hasNormals)
         {
-            glm::vec3 a = positions[pi[0]];
-            glm::vec3 b = positions[pi[1]];
-            glm::vec3 c = positions[pi[2]];
+            glm::vec3 a = positions[f.p[0]];
+            glm::vec3 b = positions[f.p[1]];
+            glm::vec3 c = positions[f.p[2]];
             flatN = glm::normalize(glm::cross(b - a, c - a));
         }
 
-        // 扇形三角化：把多边形拆成 (0,1,2) (0,2,3) (0,3,4) ... 这样的三角形
         for (int t = 1; t + 1 < count; ++t)
         {
-            int idx[3]  = { pi[0], pi[t], pi[t + 1] };   // 三个角对应的顶点下标
-            int nidx[3] = { -1, -1, -1 };                // 三个角对应的法线下标
+            int idx[3]  = { f.p[0], f.p[t], f.p[t + 1] };
+            int nidx[3] = { -1, -1, -1 };
+            int tidx[3] = { f.t[0], f.t[t], f.t[t + 1] };
             if (hasNormals)
             {
-                nidx[0] = ni[0];
-                nidx[1] = ni[t];
-                nidx[2] = ni[t + 1];
+                nidx[0] = f.n[0];
+                nidx[1] = f.n[t];
+                nidx[2] = f.n[t + 1];
             }
-
             for (int k = 0; k < 3; ++k)
             {
-                glm::vec3 normal = hasNormals ? normals[nidx[k]] : flatN;
-                pushVertex(positions[idx[k]], normal);
+                glm::vec3 n = hasNormals ? normals[nidx[k]] : flatN;
+                pushVertex(idx[k], n, tidx[k]);
             }
         }
     }
 
-    out.VertexCount = (unsigned int)(out.Data.size() / 6);
+    out.VertexCount = (unsigned int)(out.Data.size() / 8);
     out.Loaded = true;
     return true;
 }

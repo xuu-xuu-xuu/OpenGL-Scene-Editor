@@ -38,6 +38,10 @@
 #include <iostream>
 #include <string>
 #include <vector>
+#include <fstream>
+
+#define STB_IMAGE_IMPLEMENTATION
+#include <stb_image.h>
 
 // ---------- 全局状态 ----------
 Camera gCamera;
@@ -66,6 +70,8 @@ struct SceneModel
     float Yaw = 0.0f;
     float Scale = 1.0f;
     float Radius = 1.3f;
+    GLuint TexId = 0;
+    bool HasTexture = false;
     glm::vec3 BoundsMin = glm::vec3(-1.0f);
     glm::vec3 BoundsMax = glm::vec3(1.0f);
     bool Selected = false;
@@ -121,6 +127,8 @@ const char* worldVertSrc = R"(
 #version 330 core
 layout (location = 0) in vec3 aPos;
 layout (location = 1) in vec3 aNormal;
+layout (location = 2) in vec2 aUV;
+out vec2 vUV;
 uniform mat4 uModel;
 uniform mat4 uView;
 uniform mat4 uProj;
@@ -132,6 +140,7 @@ void main()
     vec4 world = uModel * vec4(aPos, 1.0);
     vWorldPos = vec3(world);
     vNormal   = uNormalMat * aNormal;
+    vUV = aUV;
     gl_Position = uProj * uView * world;
 }
 )";
@@ -140,9 +149,12 @@ const char* worldFragSrc = R"(
 #version 330 core
 in vec3 vWorldPos;
 in vec3 vNormal;
+in vec2 vUV;
 out vec4 FragColor;
 
 uniform vec3 uColor;
+uniform sampler2D uTex;
+uniform int uUseTex;
 uniform vec3 uViewPos;
 uniform float uShininess;
 uniform float uToon;
@@ -156,7 +168,8 @@ void main()
 {
     vec3 N = normalize(vNormal);
     vec3 V = normalize(uViewPos - vWorldPos);
-    vec3 result = 0.10f * uColor;
+    vec3 baseColor = (uUseTex > 0) ? texture(uTex, vUV).rgb : uColor;
+    vec3 result = 0.10f * baseColor;
     for (int i = 0; i < kMaxLights; ++i)
     {
         if (i >= uLightCount) break;
@@ -178,7 +191,7 @@ void main()
         if (uToon > 0.5f)
             spec = smoothstep(0.30f, 0.42f, ndh) * pow(ndh, 160.0f);   // 锐利高光块
         vec3 radiance = uLightColor[i] * uLightIntensity[i] * atten;
-        result += radiance * (diff * uColor + spec * vec3(0.9f));
+        result += radiance * (diff * baseColor + spec * vec3(0.9f));
     }
     FragColor = vec4(result, 1.0);
 }
@@ -261,6 +274,8 @@ const char* flatFragSrc = R"(
 #version 330 core
 out vec4 FragColor;
 uniform vec3 uColor;
+uniform sampler2D uTex;
+uniform int uUseTex;
 void main()
 {
     FragColor = vec4(uColor, 1.0);
@@ -405,13 +420,71 @@ void DestroyMesh(GLuint& vao, GLuint& vbo)
     vao = 0; vbo = 0;
 }
 
+
+// 8 float/顶点（位置+法线+UV）上传
+void UploadMeshUV(const std::vector<float>& data, GLuint& vao, GLuint& vbo)
+{
+    glGenVertexArrays(1, &vao);
+    glGenBuffers(1, &vbo);
+    glBindVertexArray(vao);
+    glBindBuffer(GL_ARRAY_BUFFER, vbo);
+    glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr)(data.size() * sizeof(float)),
+                 data.data(), GL_STATIC_DRAW);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*)0);
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float),
+                          (void*)(3 * sizeof(float)));
+    glEnableVertexAttribArray(1);
+    glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 8 * sizeof(float),
+                          (void*)(6 * sizeof(float)));
+    glEnableVertexAttribArray(2);
+    glBindVertexArray(0);
+}
+
+// 用 stb_image 加载贴图（成功返回纹理 id）
+GLuint LoadTextureFile(const std::string& path)
+{
+    stbi_set_flip_vertically_on_load(true);
+    int w = 0, h = 0, ch = 0;
+    unsigned char* data = stbi_load(path.c_str(), &w, &h, &ch, 4);
+    if (!data) return 0;
+    GLuint id = 0;
+    glGenTextures(1, &id);
+    glBindTexture(GL_TEXTURE_2D, id);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, data);
+    glGenerateMipmap(GL_TEXTURE_2D);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+    glBindTexture(GL_TEXTURE_2D, 0);
+    stbi_image_free(data);
+    return id;
+}
+
+// 带贴图绘制（uUseTex=1，绑定 unit0）
+void DrawTexturedMesh(const Shader& shader, GLuint vao, GLsizei count,
+                      const glm::mat4& model, const glm::vec3& color, GLuint tex)
+{
+    shader.SetMat4("uModel", model);
+    glm::mat3 normalMat = glm::mat3(glm::transpose(glm::inverse(model)));
+    shader.SetMat3("uNormalMat", normalMat);
+    shader.SetVec3("uColor", color);
+    shader.SetInt("uUseTex", 1);
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, tex);
+    glBindVertexArray(vao);
+    glDrawArrays(GL_TRIANGLES, 0, count);
+    glBindVertexArray(0);
+}
+
 bool LoadAndCenterObj(const std::string& path, ObjModel& out)
 {
     if (!LoadObjFile(path, out)) return false;
     glm::vec3 center = out.Center();
     float radius = out.Radius();
     float fit = (radius > 0.0001f) ? 2.6f / (2.0f * radius) : 1.0f;
-    for (size_t i = 0; i < out.Data.size(); i += 6)
+    for (size_t i = 0; i < out.Data.size(); i += 8)
     {
         glm::vec3 p(out.Data[i], out.Data[i + 1], out.Data[i + 2]);
         p = (p - center) * fit;
@@ -440,6 +513,33 @@ int AddModelFile(const std::string& path)
         m.BoundsMax = glm::max(m.BoundsMax, bv);
     }
     UploadMesh(obj.Data, m.Vao, m.Vbo);
+    m.BoundsMin = obj.BoundsMin;
+    m.BoundsMax = obj.BoundsMax;
+    UploadMeshUV(obj.Data, m.Vao, m.Vbo);
+
+    // 尝试读取同目录 .mtl 的漫反射贴图 map_Kd
+    std::string dir = path.substr(0, path.find_last_of("/\\\\") + 1);
+    size_t dot = path.find_last_of('.');
+    std::string mtlPath = (dot == std::string::npos) ? path + ".mtl" : path.substr(0, dot) + ".mtl";
+    std::string texRel;
+    {
+        std::ifstream mtl(mtlPath);
+        std::string ml;
+        while (std::getline(mtl, ml))
+        {
+            if (!ml.empty() && ml.back() == '\r') ml.pop_back();
+            std::istringstream ms(ml);
+            std::string key;
+            ms >> key;
+            if (key == "map_Kd") { ms >> texRel; break; }
+        }
+    }
+    if (!texRel.empty())
+    {
+        m.TexId = LoadTextureFile(dir + texRel);
+        m.HasTexture = (m.TexId != 0);
+        if (m.HasTexture) std::cout << "[贴图] " << texRel << std::endl;
+    }
     const glm::vec3 palette[] = {
         glm::vec3(0.90f, 0.72f, 0.40f), glm::vec3(0.55f, 0.75f, 0.95f),
         glm::vec3(0.85f, 0.45f, 0.45f), glm::vec3(0.55f, 0.85f, 0.60f),
@@ -1183,6 +1283,7 @@ void DrawMesh(const Shader& shader, GLuint vao, GLsizei count,
     glm::mat3 normalMat = glm::mat3(glm::transpose(glm::inverse(model)));
     shader.SetMat3("uNormalMat", normalMat);
     shader.SetVec3("uColor", color);
+    shader.SetInt("uUseTex", 0);
     glBindVertexArray(vao);
     glDrawArrays(GL_TRIANGLES, 0, count);
     glBindVertexArray(0);
@@ -1802,7 +1903,10 @@ GLsizei axesCount = (GLsizei)(axesData.size() / 6);
             model = glm::translate(model, m.Pos);
             model = glm::rotate(model, glm::radians(m.Yaw), glm::vec3(0, 1, 0));
             model = glm::scale(model, glm::vec3(m.Scale));
-            DrawMesh(worldShader, m.Vao, m.Count, model, m.Color);
+            if (m.HasTexture && m.TexId)
+                DrawTexturedMesh(worldShader, m.Vao, m.Count, model, m.Color, m.TexId);
+            else
+                DrawMesh(worldShader, m.Vao, m.Count, model, m.Color);
         }
 
         flatShader.Use();
