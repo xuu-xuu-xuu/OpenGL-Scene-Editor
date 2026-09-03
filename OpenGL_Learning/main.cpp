@@ -1632,6 +1632,7 @@ void ViewportUI()
 // ---------- 主函数 ----------
 int main()
 {
+    SetConsoleOutputCP(CP_UTF8);   // 控制台 UTF-8 输出，避免中文乱码
     glfwInit();
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
