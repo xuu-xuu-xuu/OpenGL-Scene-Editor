@@ -102,6 +102,7 @@ double gLastInputTime = 0.0;   // 最近一次输入动作时间（防呆用）
 // 离屏渲染目标（3D 场景画到这里，再显示在 ImGui 视口面板里）
 GLuint gSceneFbo = 0, gSceneColorTex = 0, gSceneDepthRbo = 0;
 GLuint gSceneDepthTex = 0;                  // 可采样深度纹理（描边用）
+GLuint gSceneNormalTex = 0;
 GLuint gPostFbo = 0, gPostTex = 0;          // 后处理输出（描边后画面）
 GLuint gPostVao = 0;
 int gFboW = 0, gFboH = 0;
@@ -285,6 +286,7 @@ in vec2 vUv;
 out vec4 FragColor;
 uniform sampler2D uScene;
 uniform sampler2D uDepth;
+uniform sampler2D uNormal;
 uniform float uOutlineOn;
 uniform float uGradeOn;
 
@@ -307,13 +309,50 @@ void main()
         float u = toLinear(texture(uDepth, vUv + vec2(0.0, texel.y)).r);
         float d = toLinear(texture(uDepth, vUv - vec2(0.0, texel.y)).r);
         float mag = abs(l - r) + abs(u - d);
-        float edge = smoothstep(0.02, 0.09, mag);
+        float edgeD = smoothstep(0.02, 0.09, mag);
+        vec3 nC = texture(uNormal, vUv).rgb * 2.0 - 1.0;
+        vec3 nL = texture(uNormal, vUv - vec2(texel.x, 0.0)).rgb * 2.0 - 1.0;
+        vec3 nR = texture(uNormal, vUv + vec2(texel.x, 0.0)).rgb * 2.0 - 1.0;
+        vec3 nU = texture(uNormal, vUv + vec2(0.0, texel.y)).rgb * 2.0 - 1.0;
+        vec3 nD = texture(uNormal, vUv - vec2(0.0, texel.y)).rgb * 2.0 - 1.0;
+        float magN = length(nR - nL) + length(nU - nD);
+        float edgeN = smoothstep(0.10, 0.35, magN);
+        float edge = max(edgeD, edgeN * 0.9);
         col = mix(col, vec3(0.02, 0.02, 0.03), edge * 0.85);
     }
     FragColor = vec4(col, 1.0);
 }
 )";
 
+
+// 法线通道：把视空间法线写入场景 FBO 的 COLOR_ATTACHMENT1
+const char* normalVertSrc = R"(
+#version 330 core
+layout (location = 0) in vec3 aPos;
+layout (location = 1) in vec3 aNormal;
+uniform mat4 uModel;
+uniform mat4 uView;
+uniform mat4 uProj;
+uniform mat3 uNormalMat;
+out vec3 vViewNormal;
+void main()
+{
+    vec4 world = uModel * vec4(aPos, 1.0);
+    vViewNormal = mat3(uView) * uNormalMat * aNormal;
+    gl_Position = uProj * uView * world;
+}
+)";
+
+const char* normalFragSrc = R"(
+#version 330 core
+in vec3 vViewNormal;
+out vec4 FragColor;
+void main()
+{
+    vec3 n = normalize(vViewNormal);
+    FragColor = vec4(n * 0.5 + 0.5, 1.0);
+}
+)";
 // ---------- 工具 ----------
 bool PickObjFile(std::string& outPath)
 {
@@ -1327,9 +1366,11 @@ void RecreateSceneTarget(int w, int h)
     if (w <= 0 || h <= 0) return;
     if (gSceneColorTex) glDeleteTextures(1, &gSceneColorTex);
     if (gSceneDepthTex) glDeleteTextures(1, &gSceneDepthTex);
+    if (gSceneNormalTex) glDeleteTextures(1, &gSceneNormalTex);
     if (gPostTex) glDeleteTextures(1, &gPostTex);
     if (gPostFbo) glDeleteFramebuffers(1, &gPostFbo);
     if (gSceneDepthTex) glDeleteTextures(1, &gSceneDepthTex);
+    if (gSceneNormalTex) glDeleteTextures(1, &gSceneNormalTex);
     if (gSceneDepthRbo) glDeleteRenderbuffers(1, &gSceneDepthRbo);
     if (gSceneFbo) glDeleteFramebuffers(1, &gSceneFbo);
     if (gPostTex) glDeleteTextures(1, &gPostTex);
@@ -1355,6 +1396,14 @@ void RecreateSceneTarget(int w, int h)
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 
+    // 法线纹理（视空间法线打包到 0..1）
+    glGenTextures(1, &gSceneNormalTex);
+    glBindTexture(GL_TEXTURE_2D, gSceneNormalTex);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
     // 后处理颜色
     glGenTextures(1, &gPostTex);
     glBindTexture(GL_TEXTURE_2D, gPostTex);
@@ -1369,6 +1418,7 @@ void RecreateSceneTarget(int w, int h)
     glBindFramebuffer(GL_FRAMEBUFFER, gSceneFbo);
     glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, gSceneColorTex, 0);
     glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, gSceneDepthTex, 0);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1, GL_TEXTURE_2D, gSceneNormalTex, 0);
 
     // 后处理 FBO
     glGenFramebuffers(1, &gPostFbo);
@@ -1531,6 +1581,7 @@ int main()
     Shader skyShader(skyVertSrc, skyFragSrc);
     Shader flatShader(flatVertSrc, flatFragSrc);
     Shader postShader(postVertSrc, postFragSrc);
+    Shader normalShader(normalVertSrc, normalFragSrc);
     glGenVertexArrays(1, &gPostVao);
 
     worldShader.Use();
@@ -1845,6 +1896,35 @@ GLsizei axesCount = (GLsizei)(axesData.size() / 6);
             glDepthFunc(GL_LESS);
         }
 
+        // ---- 法线通道：内部折痕描边用 ----
+        if (gSceneNormalTex)
+        {
+            glDrawBuffer(GL_COLOR_ATTACHMENT1);
+            glDepthFunc(GL_LEQUAL);
+            glClearColor(0.5f, 0.5f, 1.0f, 1.0f);
+            glClear(GL_COLOR_BUFFER_BIT);
+            normalShader.Use();
+            normalShader.SetMat4("uView", view);
+            normalShader.SetMat4("uProj", proj);
+            for (const BoxPlacement& box : boxes)
+            {
+                glm::mat4 model(1.0f);
+                model = glm::translate(model, box.Pos);
+                model = glm::scale(model, box.Scale);
+                DrawMesh(normalShader, cubeVao, cubeCount, model, box.Color);
+            }
+            for (SceneModel& m : gModels)
+            {
+                if (!m.Valid) continue;
+                glm::mat4 model(1.0f);
+                model = glm::translate(model, m.Pos);
+                model = glm::rotate(model, glm::radians(m.Yaw), glm::vec3(0, 1, 0));
+                model = glm::scale(model, glm::vec3(m.Scale));
+                DrawMesh(normalShader, m.Vao, m.Count, model, m.Color);
+            }
+            glDrawBuffer(GL_COLOR_ATTACHMENT0);
+            glDepthFunc(GL_LESS);
+        }
         // 屏幕空间描边后处理
         if (gPostFbo && gSceneColorTex && gSceneDepthTex)
         {
@@ -1860,6 +1940,9 @@ GLsizei axesCount = (GLsizei)(axesData.size() / 6);
             glBindTexture(GL_TEXTURE_2D, gSceneDepthTex);
             postShader.SetInt("uScene", 0);
             postShader.SetInt("uDepth", 1);
+            glActiveTexture(GL_TEXTURE2);
+            glBindTexture(GL_TEXTURE_2D, gSceneNormalTex);
+            postShader.SetInt("uNormal", 2);
             postShader.SetFloat("uOutlineOn", gOutline ? 1.0f : 0.0f);
             postShader.SetFloat("uGradeOn", gGrade ? 1.0f : 0.0f);
             glBindVertexArray(gPostVao);
@@ -1937,6 +2020,7 @@ glDeleteVertexArrays(1, &axesVao);
     glDeleteBuffers(1, &boxEdgesVbo);
     if (gSceneColorTex) glDeleteTextures(1, &gSceneColorTex);
     if (gSceneDepthTex) glDeleteTextures(1, &gSceneDepthTex);
+    if (gSceneNormalTex) glDeleteTextures(1, &gSceneNormalTex);
     if (gPostTex) glDeleteTextures(1, &gPostTex);
     if (gPostFbo) glDeleteFramebuffers(1, &gPostFbo);
     if (gSceneDepthRbo) glDeleteRenderbuffers(1, &gSceneDepthRbo);
