@@ -533,9 +533,16 @@ int AddModelFile(const std::string& path)
         mtlName = (dot == std::string::npos) ? path + ".mtl" : path.substr(0, dot) + ".mtl";
         if (mtlName.find_first_of("/\\") == std::string::npos) mtlName = dir + mtlName;
     }
-    else if (mtlName.find_first_of("/\\") == std::string::npos)
+    else
     {
-        mtlName = dir + mtlName;
+        bool absPath = (mtlName.size() >= 3 && isalpha((unsigned char)mtlName[0]) && mtlName[1] == ':') ||
+                       (!mtlName.empty() && (mtlName[0] == '/' || mtlName[0] == '\\'));
+        if (!absPath)
+        {
+            if (mtlName.rfind("./", 0) == 0 || mtlName.rfind(".\\", 0) == 0)
+                mtlName = mtlName.substr(2);
+            mtlName = dir + mtlName;
+        }
     }
 
     std::string texRel;
