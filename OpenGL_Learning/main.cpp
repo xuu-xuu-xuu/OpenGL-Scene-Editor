@@ -561,11 +561,24 @@ int AddModelFile(const std::string& path)
     }
     if (!texRel.empty())
     {
-        m.TexId = LoadTextureFile(dir + texRel);
-        m.HasTexture = (m.TexId != 0);
-        if (m.HasTexture) std::cout << "[贴图] " << texRel << std::endl;
-        else std::cout << "[贴图失败] " << dir + texRel << " -> "
-                      << (stbi_failure_reason() ? stbi_failure_reason() : "unknown") << std::endl;
+        // mtl 里的路径可能是别的电脑的绝对路径；依次尝试：原路径、同目录、同目录+文件名
+        std::vector<std::string> tries;
+        if (texRel.size() >= 2 && texRel[1] == ':') tries.push_back(texRel);
+        tries.push_back(dir + texRel);
+        size_t slash = texRel.find_last_of("/\\\\");
+        if (slash != std::string::npos) tries.push_back(dir + texRel.substr(slash + 1));
+
+        for (const std::string& cand : tries)
+        {
+            m.TexId = LoadTextureFile(cand);
+            if (m.TexId) { m.HasTexture = true; std::cout << "[贴图] " << cand << std::endl; break; }
+        }
+        if (!m.HasTexture)
+        {
+            std::cout << "[贴图失败] 尝试了:";
+            for (const std::string& cand : tries) std::cout << "  " << cand;
+            std::cout << std::endl;
+        }
     }
     const glm::vec3 palette[] = {
         glm::vec3(0.90f, 0.72f, 0.40f), glm::vec3(0.55f, 0.75f, 0.95f),
