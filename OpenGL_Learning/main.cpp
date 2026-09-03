@@ -38,6 +38,7 @@
 #include <iostream>
 #include <string>
 #include <vector>
+#include <map>
 #include <fstream>
 
 #define STB_IMAGE_IMPLEMENTATION
@@ -59,6 +60,14 @@ bool gOutline = true;   // 屏幕空间黑色描边开关
 bool gGrade = true;   // 后期调色（降饱和/抬黑位/暗角）
 const int kMaxLights = 8;
 
+struct ModelSubMesh
+{
+    GLuint TexId = 0;
+    bool HasTexture = false;
+    unsigned int Start = 0;
+    unsigned int Count = 0;
+};
+
 struct SceneModel
 {
     bool Valid = false;
@@ -70,11 +79,10 @@ struct SceneModel
     float Yaw = 0.0f;
     float Scale = 1.0f;
     float Radius = 1.3f;
-    GLuint TexId = 0;
-    bool HasTexture = false;
     glm::vec3 BoundsMin = glm::vec3(-1.0f);
     glm::vec3 BoundsMax = glm::vec3(1.0f);
     bool Selected = false;
+    std::vector<ModelSubMesh> Subs;   // 按材质拆分的子网格
 };
 
 struct SceneLight
@@ -462,6 +470,46 @@ GLuint LoadTextureFile(const std::string& path)
     return id;
 }
 
+// 简单纹理缓存：同一路径只加载一次
+GLuint LoadTextureCached(const std::string& path)
+{
+    static std::vector<std::pair<std::string, GLuint>> cache;
+    for (auto& kv : cache) if (kv.first == path) return kv.second;
+    GLuint id = LoadTextureFile(path);
+    if (id) cache.push_back(std::make_pair(path, id));
+    return id;
+}
+
+// 按材质子网格绘制
+void DrawModelRanges(const Shader& sh, const SceneModel& m,
+                     const glm::mat4& model, const glm::vec3& color)
+{
+    sh.SetMat4("uModel", model);
+    glm::mat3 normalMat = glm::mat3(glm::transpose(glm::inverse(model)));
+    sh.SetMat3("uNormalMat", normalMat);
+    sh.SetVec3("uColor", color);
+    glBindVertexArray(m.Vao);
+    if (m.Subs.empty())
+    {
+        sh.SetInt("uUseTex", 0);
+        glDrawArrays(GL_TRIANGLES, 0, m.Count);
+    }
+    else
+    {
+        for (const ModelSubMesh& sm : m.Subs)
+        {
+            sh.SetInt("uUseTex", sm.HasTexture ? 1 : 0);
+            if (sm.HasTexture)
+            {
+                glActiveTexture(GL_TEXTURE0);
+                glBindTexture(GL_TEXTURE_2D, sm.TexId);
+            }
+            glDrawArrays(GL_TRIANGLES, sm.Start, sm.Count);
+        }
+    }
+    glBindVertexArray(0);
+}
+
 // 带贴图绘制（uUseTex=1，绑定 unit0）
 void DrawTexturedMesh(const Shader& shader, GLuint vao, GLsizei count,
                       const glm::mat4& model, const glm::vec3& color, GLuint tex)
@@ -484,6 +532,8 @@ bool LoadAndCenterObj(const std::string& path, ObjModel& out)
     glm::vec3 center = out.Center();
     float radius = out.Radius();
     float fit = (radius > 0.0001f) ? 2.6f / (2.0f * radius) : 1.0f;
+    glm::vec3 oldMin = out.BoundsMin;
+    glm::vec3 oldMax = out.BoundsMax;
     for (size_t i = 0; i < out.Data.size(); i += 8)
     {
         glm::vec3 p(out.Data[i], out.Data[i + 1], out.Data[i + 2]);
@@ -492,6 +542,8 @@ bool LoadAndCenterObj(const std::string& path, ObjModel& out)
         out.Data[i + 1] = p.y;
         out.Data[i + 2] = p.z;
     }
+    out.BoundsMin = (oldMin - center) * fit;
+    out.BoundsMax = (oldMax - center) * fit;
     return true;
 }
 
@@ -508,7 +560,7 @@ int AddModelFile(const std::string& path)
     m.BoundsMax = obj.BoundsMax;
     UploadMeshUV(obj.Data, m.Vao, m.Vbo);
 
-    // ---- 材质/贴图加载 ----
+    // ---- 定位 .mtl ----
     std::string dir = path.substr(0, path.find_last_of("/\\") + 1);
     std::string mtlName;
     {
@@ -545,48 +597,64 @@ int AddModelFile(const std::string& path)
         }
     }
 
-    std::string texRel;
+    // ---- 解析所有 newmtl 的 map_Kd ----
+    std::map<std::string, std::string> texByMat;
     {
         std::ifstream mtl(mtlName);
         std::string ml;
+        std::string curMat;
         while (std::getline(mtl, ml))
         {
             if (!ml.empty() && ml.back() == '\r') ml.pop_back();
             std::istringstream ms(ml);
             std::string key;
             ms >> key;
-            if (key == "map_Kd")
+            if (key == "newmtl") { ms >> curMat; }
+            else if (key == "map_Kd" && !curMat.empty())
             {
-                std::getline(ms, texRel);
-                size_t b2 = texRel.find_first_not_of(" \t\"");
-                if (b2 != std::string::npos) texRel = texRel.substr(b2);
-                size_t e2 = texRel.find_last_not_of(" \t\"");
-                if (e2 != std::string::npos) texRel = texRel.substr(0, e2 + 1);
-                break;
+                std::string rel;
+                std::getline(ms, rel);
+                size_t b2 = rel.find_first_not_of(" \t\"");
+                if (b2 != std::string::npos) rel = rel.substr(b2);
+                size_t e2 = rel.find_last_not_of(" \t\"");
+                if (e2 != std::string::npos) rel = rel.substr(0, e2 + 1);
+                texByMat[curMat] = rel;
             }
         }
     }
-    if (!texRel.empty())
-    {
-        // mtl 里的路径可能是别的电脑的绝对路径；依次尝试：原路径、同目录、同目录+文件名
-        std::vector<std::string> tries;
-        if (texRel.size() >= 2 && texRel[1] == ':') tries.push_back(texRel);
-        tries.push_back(dir + texRel);
-        size_t slash = texRel.find_last_of("/\\\\");
-        if (slash != std::string::npos) tries.push_back(dir + texRel.substr(slash + 1));
 
-        for (const std::string& cand : tries)
+    // ---- 按材质分段建子网格 ----
+    for (const ObjMatRange& r : obj.Materials)
+    {
+        ModelSubMesh sm;
+        sm.HasTexture = false;
+        auto it = texByMat.find(r.Material);
+        if (it != texByMat.end() && !it->second.empty())
         {
-            m.TexId = LoadTextureFile(cand);
-            if (m.TexId) { m.HasTexture = true; std::cout << "[贴图] " << cand << std::endl; break; }
+            std::string texRel = it->second;
+            std::vector<std::string> tries;
+            if (texRel.size() >= 2 && texRel[1] == ':') tries.push_back(texRel);
+            tries.push_back(dir + texRel);
+            size_t slash = texRel.find_last_of("/\\");
+            if (slash != std::string::npos) tries.push_back(dir + texRel.substr(slash + 1));
+            for (const std::string& cand : tries)
+            {
+                GLuint tid = LoadTextureCached(cand);
+                if (tid) { sm.TexId = tid; sm.HasTexture = true; break; }
+            }
         }
-        if (!m.HasTexture)
-        {
-            std::cout << "[贴图失败] 尝试了:";
-            for (const std::string& cand : tries) std::cout << "  " << cand;
-            std::cout << std::endl;
-        }
+        sm.Start = r.Start;
+        sm.Count = r.Count;
+        m.Subs.push_back(sm);
     }
+    if (m.Subs.empty())
+    {
+        ModelSubMesh sm;
+        sm.Start = 0;
+        sm.Count = obj.VertexCount;
+        m.Subs.push_back(sm);
+    }
+
     const glm::vec3 palette[] = {
         glm::vec3(0.90f, 0.72f, 0.40f), glm::vec3(0.55f, 0.75f, 0.95f),
         glm::vec3(0.85f, 0.45f, 0.45f), glm::vec3(0.55f, 0.85f, 0.60f),
@@ -1951,10 +2019,7 @@ GLsizei axesCount = (GLsizei)(axesData.size() / 6);
             model = glm::translate(model, m.Pos);
             model = glm::rotate(model, glm::radians(m.Yaw), glm::vec3(0, 1, 0));
             model = glm::scale(model, glm::vec3(m.Scale));
-            if (m.HasTexture && m.TexId)
-                DrawTexturedMesh(worldShader, m.Vao, m.Count, model, m.Color, m.TexId);
-            else
-                DrawMesh(worldShader, m.Vao, m.Count, model, m.Color);
+                DrawModelRanges(worldShader, m, model, m.Color);
         }
 
         flatShader.Use();
