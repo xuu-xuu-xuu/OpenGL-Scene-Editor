@@ -93,6 +93,7 @@ bool gLeftDown = false;
 int  gImportCount = 0;
 const float kAxisPickPixels = 14.0f;
 HIMC g_SavedImeContext = nullptr;
+double gLastInputTime = 0.0;   // 最近一次输入动作时间（防呆用）
 
 // 离屏渲染目标（3D 场景画到这里，再显示在 ImGui 视口面板里）
 GLuint gSceneFbo = 0, gSceneColorTex = 0, gSceneDepthRbo = 0;
@@ -661,12 +662,14 @@ std::vector<float> MakeBoxEdgesData()
 // ---------- ImGui 事件转发 ----------
 void CharCallback(GLFWwindow* window, unsigned int codepoint)
 {
+    gLastInputTime = glfwGetTime();
     if (ImGui::GetCurrentContext())
         ImGui_ImplGlfw_CharCallback(window, codepoint);
 }
 
 void KeyCallback(GLFWwindow* window, int key, int scancode, int action, int mods)
 {
+    gLastInputTime = glfwGetTime();
     if (ImGui::GetCurrentContext())
         ImGui_ImplGlfw_KeyCallback(window, key, scancode, action, mods);
 }
@@ -679,6 +682,7 @@ void FramebufferSizeCallback(GLFWwindow* window, int width, int height)
 
 void MouseButtonCallback(GLFWwindow* window, int button, int action, int mods)
 {
+    gLastInputTime = glfwGetTime();
     if (ImGui::GetCurrentContext())
         ImGui_ImplGlfw_MouseButtonCallback(window, button, action, mods);
 
@@ -860,6 +864,7 @@ void MouseButtonCallback(GLFWwindow* window, int button, int action, int mods)
 
 void CursorPosCallback(GLFWwindow* window, double xpos, double ypos)
 {
+    gLastInputTime = glfwGetTime();
     bool curInViewport = (xpos >= gViewportMinX && ypos >= gViewportMinY &&
                           xpos < gViewportMinX + gViewportW && ypos < gViewportMinY + gViewportH);
     if (!curInViewport && !gRightMouseDown && !gLeftDown)
@@ -1494,6 +1499,15 @@ GLsizei axesCount = (GLsizei)(axesData.size() / 6);
             std::cout << "[提示] 已呼出鼠标光标（Alt）" << std::endl;
         }
         prevAlt = nowAlt;
+
+        // 防呆：隐藏光标状态连续 6 秒无任何输入动作则自动恢复
+        if (gRightMouseDown && (now - gLastInputTime) > 6.0)
+        {
+            glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
+            gRightMouseDown = false;
+            gFirstMouse = true;
+            std::cout << "[提示] 长时间无操作，已自动恢复鼠标光标" << std::endl;
+        }
 
         if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS)
             glfwSetWindowShouldClose(window, true);
