@@ -703,6 +703,44 @@ void MouseButtonCallback(GLFWwindow* window, int button, int action, int mods)
         gPressY = my;
         if (!ViewportCursorInScene(mx, my)) return;   // 黑边不拾取
 
+        // 1) 已有选中物：先抓中心小球（自由移动），再抓坐标轴
+        if (HasSelection())
+        {
+            glm::mat4 vw, pj;
+            CurrentViewProj(window, vw, pj);
+            auto toPx = [&](const glm::vec3& w, float& sx, float& sy) -> bool
+            {
+                glm::vec4 clip = pj * vw * glm::vec4(w, 1.0f);
+                if (clip.w <= 0.0001f) return false;
+                glm::vec3 ndc = glm::vec3(clip) / clip.w;
+                if (ndc.z < -1.0f || ndc.z > 1.0f) return false;
+                sx = (ndc.x * 0.5f + 0.5f) * gSceneFBW;
+                sy = (1.0f - (ndc.y * 0.5f + 0.5f)) * gSceneFBH;
+                return true;
+            };
+            float bsx, bsy;
+            if (toPx(SelPos(), bsx, bsy))
+            {
+                float dx = (float)(mx * gViewportScaleX - gSceneFBX) - bsx;
+                float dy = (float)(my * gViewportScaleY - gSceneFBY) - bsy;
+                float tol = 20.0f * (float)gViewportScaleX;
+                if (dx * dx + dy * dy <= tol * tol)
+                {
+                    gGrabAxis = 3;   // 3 = 中心球
+                    gDragMoveEnabled = true;
+                    gDragStarted = true;
+                    gGrabStartPos = SelPos();
+                    gDragPlaneNormal = (glfwGetKey(window, GLFW_KEY_LEFT_CONTROL) == GLFW_PRESS)
+                        ? gCamera.Front : glm::vec3(0.0f, 1.0f, 0.0f);
+                    glm::vec3 o, d;
+                    ScreenToRay(window, vw, pj, mx, my, o, d);
+                    float tt = 0.0f;
+                    if (RayPlaneIntersect(o, d, SelPos(), gDragPlaneNormal, tt))
+                        gGrabStartHit = o + d * tt;
+                    return;
+                }
+            }
+        }
         // 1) 已有选中物：优先抓坐标轴（抓轴 = 立即允许拖动）
         int axis = PickAxis(window, mx, my);
         if (axis >= 0)
@@ -749,14 +787,7 @@ void MouseButtonCallback(GLFWwindow* window, int button, int action, int mods)
         else if (bestModel >= 0) SelectModel(bestModel);
         else { ClearSelection(); return; }   // 点在所有选中框之外 => 取消选中
 
-        // 3) 点在物体上：允许拖动，但只有移动超过阈值才真正开始
-        gDragMoveEnabled = true;
-        gGrabStartPos = SelPos();
-        gDragPlaneNormal = (glfwGetKey(window, GLFW_KEY_LEFT_CONTROL) == GLFW_PRESS)
-            ? gCamera.Front : glm::vec3(0.0f, 1.0f, 0.0f);
-        float t = 0.0f;
-        if (RayPlaneIntersect(origin, dir, SelPos(), gDragPlaneNormal, t))
-            gGrabStartHit = origin + dir * t;
+        // 点物体只负责选中/取消；移动必须拖中心小球或坐标轴
     }
     else if (action == GLFW_RELEASE)
     {
@@ -779,7 +810,7 @@ void CursorPosCallback(GLFWwindow* window, double xpos, double ypos)
     double lx = xpos - gViewportMinX;
     double ly = ypos - gViewportMinY;
     // 轴拖动（点击时已启用，立即生效）
-    if (gLeftDown && gGrabAxis >= 0 && HasSelection())
+    if (gLeftDown && gGrabAxis >= 0 && gGrabAxis <= 2 && HasSelection())
     {
         glm::mat4 view, proj;
         CurrentViewProj(window, view, proj);
@@ -797,7 +828,7 @@ void CursorPosCallback(GLFWwindow* window, double xpos, double ypos)
     }
 
     // 自由拖动：先超过启动阈值，再按“起点 + 偏移”移动（不会瞬移到鼠标处）
-    if (gLeftDown && HasSelection() && gDragMoveEnabled)
+    if (gLeftDown && gGrabAxis == 3 && HasSelection() && gDragMoveEnabled)
     {
         if (!gDragStarted)
         {
@@ -1577,6 +1608,19 @@ GLsizei axesCount = (GLsizei)(axesData.size() / 6);
             glBindVertexArray(0);
         }
 
+        // 选中物体：中心小球 = 自由移动手柄
+        if (HasSelection())
+        {
+            flatShader.Use();
+            glm::mat4 ballM(1.0f);
+            ballM = glm::translate(ballM, SelPos());
+            ballM = glm::scale(ballM, glm::vec3(0.18f));
+            flatShader.SetMat4("uMvp", proj * view * ballM);
+            flatShader.SetVec3("uColor", glm::vec3(1.0f, 0.96f, 0.88f));
+            glBindVertexArray(sphereVao);
+            glDrawArrays(GL_TRIANGLES, 0, sphereCount);
+            glBindVertexArray(0);
+        }
         // 选中模型的橙色包围盒线框
         if (gSelModel >= 0 && gSelModel < (int)gModels.size())
         {
