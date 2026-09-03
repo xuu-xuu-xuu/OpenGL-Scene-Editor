@@ -745,6 +745,8 @@ void MouseButtonCallback(GLFWwindow* window, int button, int action, int mods)
                 if (dx * dx + dy * dy <= tol * tol)
                 {
                     gGrabAxis = 3;   // 3 = 中心球
+            HWND hcap3 = glfwGetWin32Window(window);
+            if (hcap3) SetCapture(hcap3);   // 窗口捕获：拖出窗口也持续跟踪
                     gDragMoveEnabled = true;
                     gDragStarted = true;
                     gGrabStartPos = SelPos();
@@ -766,6 +768,8 @@ void MouseButtonCallback(GLFWwindow* window, int button, int action, int mods)
         if (axis >= 0)
         {
             gGrabAxis = axis;
+                HWND hcapA = glfwGetWin32Window(window);
+                if (hcapA) SetCapture(hcapA);
             gGrabStartPos = SelPos();
             gDragMoveEnabled = true;
             gDragStarted = true;
@@ -846,6 +850,8 @@ void MouseButtonCallback(GLFWwindow* window, int button, int action, int mods)
     else if (action == GLFW_RELEASE)
     {
         gLeftDown = false;
+        HWND hrel = glfwGetWin32Window(window);
+        if (hrel) ReleaseCapture();
         gGrabAxis = -1;
         gDragStarted = false;
         gDragMoveEnabled = false;
