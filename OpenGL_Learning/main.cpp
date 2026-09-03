@@ -504,26 +504,43 @@ int AddModelFile(const std::string& path)
     m.Valid = true;
     m.Count = (GLsizei)obj.VertexCount;
     m.Radius = obj.Radius();
-    m.BoundsMin = glm::vec3(1e30f);
-    m.BoundsMax = glm::vec3(-1e30f);
-    for (size_t bi = 0; bi < obj.Data.size(); bi += 6)
-    {
-        glm::vec3 bv(obj.Data[bi], obj.Data[bi + 1], obj.Data[bi + 2]);
-        m.BoundsMin = glm::min(m.BoundsMin, bv);
-        m.BoundsMax = glm::max(m.BoundsMax, bv);
-    }
-    UploadMesh(obj.Data, m.Vao, m.Vbo);
     m.BoundsMin = obj.BoundsMin;
     m.BoundsMax = obj.BoundsMax;
     UploadMeshUV(obj.Data, m.Vao, m.Vbo);
 
-    // 尝试读取同目录 .mtl 的漫反射贴图 map_Kd
-    std::string dir = path.substr(0, path.find_last_of("/\\\\") + 1);
-    size_t dot = path.find_last_of('.');
-    std::string mtlPath = (dot == std::string::npos) ? path + ".mtl" : path.substr(0, dot) + ".mtl";
+    // ---- 材质/贴图加载 ----
+    std::string dir = path.substr(0, path.find_last_of("/\\") + 1);
+    std::string mtlName;
+    {
+        std::ifstream objf(path);
+        std::string l;
+        while (std::getline(objf, l))
+        {
+            if (!l.empty() && l.back() == '\r') l.pop_back();
+            std::istringstream ls(l);
+            std::string key;
+            ls >> key;
+            if (key == "mtllib") { std::getline(ls, mtlName); break; }
+        }
+        size_t b = mtlName.find_first_not_of(" \t\"");
+        if (b != std::string::npos) mtlName = mtlName.substr(b);
+        size_t en = mtlName.find_last_not_of(" \t\"");
+        if (en != std::string::npos) mtlName = mtlName.substr(0, en + 1);
+    }
+    if (mtlName.empty())
+    {
+        size_t dot = path.find_last_of('.');
+        mtlName = (dot == std::string::npos) ? path + ".mtl" : path.substr(0, dot) + ".mtl";
+        if (mtlName.find_first_of("/\\") == std::string::npos) mtlName = dir + mtlName;
+    }
+    else if (mtlName.find_first_of("/\\") == std::string::npos)
+    {
+        mtlName = dir + mtlName;
+    }
+
     std::string texRel;
     {
-        std::ifstream mtl(mtlPath);
+        std::ifstream mtl(mtlName);
         std::string ml;
         while (std::getline(mtl, ml))
         {
@@ -531,7 +548,15 @@ int AddModelFile(const std::string& path)
             std::istringstream ms(ml);
             std::string key;
             ms >> key;
-            if (key == "map_Kd") { ms >> texRel; break; }
+            if (key == "map_Kd")
+            {
+                std::getline(ms, texRel);
+                size_t b2 = texRel.find_first_not_of(" \t\"");
+                if (b2 != std::string::npos) texRel = texRel.substr(b2);
+                size_t e2 = texRel.find_last_not_of(" \t\"");
+                if (e2 != std::string::npos) texRel = texRel.substr(0, e2 + 1);
+                break;
+            }
         }
     }
     if (!texRel.empty())
@@ -539,6 +564,8 @@ int AddModelFile(const std::string& path)
         m.TexId = LoadTextureFile(dir + texRel);
         m.HasTexture = (m.TexId != 0);
         if (m.HasTexture) std::cout << "[贴图] " << texRel << std::endl;
+        else std::cout << "[贴图失败] " << dir + texRel << " -> "
+                      << (stbi_failure_reason() ? stbi_failure_reason() : "unknown") << std::endl;
     }
     const glm::vec3 palette[] = {
         glm::vec3(0.90f, 0.72f, 0.40f), glm::vec3(0.55f, 0.75f, 0.95f),
