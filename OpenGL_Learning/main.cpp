@@ -87,6 +87,8 @@ double gPressX = 0.0, gPressY = 0.0;
 bool gDragMoveEnabled = false;   // 本次按下是否允许拖动（必须点在物体上）
 bool gDragStarted = false;       // 是否已越过启动阈值（防止点击瞬移）
 glm::vec3 gDragPlaneNormal(0.0f, 1.0f, 0.0f);
+glm::vec3 gLastDragHit;
+glm::vec3 gLastDragPos;
 bool gLeftDown = false;
 int  gImportCount = 0;
 const float kAxisPickPixels = 14.0f;
@@ -477,6 +479,22 @@ void ScreenToRay(GLFWwindow* window, const glm::mat4& view, const glm::mat4& pro
     dir = glm::normalize(farP - nearP);
 }
 
+
+// 拖动专用射线：允许鼠标越过黑边/场景矩形继续延伸，避免快速拖动“脱手”
+void DragRay(GLFWwindow* window, const glm::mat4& view, const glm::mat4& proj,
+             double lx, double ly, glm::vec3& origin, glm::vec3& dir)
+{
+    origin = gCamera.Position;
+    if (gSceneFBW <= 0 || gSceneFBH <= 0) { dir = gCamera.Front; return; }
+    float fx = (float)(lx * gViewportScaleX);
+    float fy = (float)(ly * gViewportScaleY);
+    float sx = fx - gSceneFBX;
+    float sy = fy - gSceneFBY;
+    glm::vec4 viewport(0.0f, 0.0f, (float)gSceneFBW, (float)gSceneFBH);
+    glm::vec3 nearP = glm::unProject(glm::vec3(sx, (float)gSceneFBH - sy, 0.0f), view, proj, viewport);
+    glm::vec3 farP  = glm::unProject(glm::vec3(sx, (float)gSceneFBH - sy, 1.0f), view, proj, viewport);
+    dir = glm::normalize(farP - nearP);
+}
 bool RaySphereIntersect(const glm::vec3& origin, const glm::vec3& dir,
                         const glm::vec3& center, float radius, float& outT)
 {
@@ -737,6 +755,8 @@ void MouseButtonCallback(GLFWwindow* window, int button, int action, int mods)
                     float tt = 0.0f;
                     if (RayPlaneIntersect(o, d, SelPos(), gDragPlaneNormal, tt))
                         gGrabStartHit = o + d * tt;
+                        gLastDragHit = gGrabStartHit;
+                        gLastDragPos = gGrabStartPos;
                     return;
                 }
             }
@@ -757,6 +777,8 @@ void MouseButtonCallback(GLFWwindow* window, int button, int action, int mods)
             float t = 0.0f;
             if (RayPlaneIntersect(origin, dir, SelPos(), gDragPlaneNormal, t))
                 gGrabStartHit = origin + dir * t;
+                gLastDragHit = gGrabStartHit;
+                gLastDragPos = gGrabStartPos;
             return;
         }
 
@@ -783,6 +805,38 @@ void MouseButtonCallback(GLFWwindow* window, int button, int action, int mods)
             { bestT = t; bestLight = -1; bestModel = i; }
         }
 
+
+        // 远距离小目标：射线未命中时做屏幕空间就近兜底
+        if (bestLight < 0 && bestModel < 0)
+        {
+            float cx = (float)(mx * gViewportScaleX) - gSceneFBX;
+            float cy = (float)(my * gViewportScaleY) - gSceneFBY;
+            float tol = 18.0f * (float)gViewportScaleX;
+            auto screenDist = [&](const glm::vec3& w) -> float
+            {
+                glm::vec4 clip = proj * view * glm::vec4(w, 1.0f);
+                if (clip.w <= 0.0001f) return 1e9f;
+                glm::vec3 ndc = glm::vec3(clip) / clip.w;
+                if (ndc.z < -1.0f || ndc.z > 1.0f) return 1e9f;
+                float sx = (ndc.x * 0.5f + 0.5f) * gSceneFBW;
+                float sy = (1.0f - (ndc.y * 0.5f + 0.5f)) * gSceneFBH;
+                float dx = sx - cx;
+                float dy = sy - cy;
+                return dx * dx + dy * dy;
+            };
+            float bestD = 1e9f;
+            for (int i = 0; i < (int)gLights.size(); ++i)
+            {
+                float d = screenDist(gLights[i].Position);
+                if (d < bestD) { bestD = d; bestLight = i; bestModel = -1; }
+            }
+            for (int i = 0; i < (int)gModels.size(); ++i)
+            {
+                float d = screenDist(gModels[i].Pos);
+                if (d < bestD) { bestD = d; bestLight = -1; bestModel = i; }
+            }
+            if (bestD > tol * tol) { bestLight = -1; bestModel = -1; }
+        }
         if (bestLight >= 0) SelectLight(bestLight);
         else if (bestModel >= 0) SelectModel(bestModel);
         else { ClearSelection(); return; }   // 点在所有选中框之外 => 取消选中
@@ -809,62 +863,48 @@ void CursorPosCallback(GLFWwindow* window, double xpos, double ypos)
     }
     double lx = xpos - gViewportMinX;
     double ly = ypos - gViewportMinY;
-    // 轴拖动（点击时已启用，立即生效）
+    // 轴拖动：只沿该轴，增量跟随
     if (gLeftDown && gGrabAxis >= 0 && gGrabAxis <= 2 && HasSelection())
     {
         glm::mat4 view, proj;
         CurrentViewProj(window, view, proj);
         glm::vec3 origin, dir;
-        ScreenToRay(window, view, proj, lx, ly, origin, dir);
+        DragRay(window, view, proj, lx, ly, origin, dir);
         float t = 0.0f;
-        if (RayPlaneIntersect(origin, dir, SelPos(), gCamera.Front, t))
+        if (RayPlaneIntersect(origin, dir, gLastDragPos, gCamera.Front, t))
         {
             glm::vec3 hit = origin + dir * t;
             glm::vec3 axis = AxisDirWorld(gGrabAxis);
-            float delta = glm::dot(hit - gGrabStartHit, axis);
-            SetSelPos(gGrabStartPos + axis * delta);
-        }
-        return;
-    }
-
-    // 自由拖动：先超过启动阈值，再按“起点 + 偏移”移动（不会瞬移到鼠标处）
-    if (gLeftDown && gGrabAxis == 3 && HasSelection() && gDragMoveEnabled)
-    {
-        if (!gDragStarted)
-        {
-            double dx = lx - gPressX;
-            double dy = ly - gPressY;
-            if (dx * dx + dy * dy < 10.0 * 10.0) return;   // 超过 10 像素才算拖动
-            gDragStarted = true;
-
-            // 以“越过阈值那一刻”的鼠标位置为锚点，避免第一帧产生大位移
-            glm::mat4 av, ap;
-            CurrentViewProj(window, av, ap);
-            glm::vec3 ao, ad;
-            ScreenToRay(window, av, ap, lx, ly, ao, ad);
-            float at = 0.0f;
-            if (RayPlaneIntersect(ao, ad, gGrabStartPos, gDragPlaneNormal, at))
-                gGrabStartHit = ao + ad * at;
-            return;
-        }
-
-        glm::mat4 view, proj;
-        CurrentViewProj(window, view, proj);
-        glm::vec3 origin, dir;
-        ScreenToRay(window, view, proj, lx, ly, origin, dir);
-        float t = 0.0f;
-        if (RayPlaneIntersect(origin, dir, gGrabStartPos, gDragPlaneNormal, t))
-        {
-            glm::vec3 hit = origin + dir * t;
-            glm::vec3 offset = hit - gGrabStartHit;
-            offset -= gDragPlaneNormal * glm::dot(offset, gDragPlaneNormal);
-            glm::vec3 np = gGrabStartPos + offset;
-            if (gSelLight >= 0 && np.y < 0.2f) np.y = 0.2f;
+            float delta = glm::dot(hit - gLastDragHit, axis);
+            glm::vec3 np = gLastDragPos + axis * delta;
+            gLastDragHit = hit;
+            gLastDragPos = np;
             SetSelPos(np);
         }
         return;
     }
 
+    // 中心球：自由移动，增量跟随（快速拖动也不会脱手）
+    if (gLeftDown && gGrabAxis == 3 && HasSelection() && gDragMoveEnabled)
+    {
+        glm::mat4 view, proj;
+        CurrentViewProj(window, view, proj);
+        glm::vec3 origin, dir;
+        DragRay(window, view, proj, lx, ly, origin, dir);
+        float t = 0.0f;
+        if (RayPlaneIntersect(origin, dir, gLastDragPos, gDragPlaneNormal, t))
+        {
+            glm::vec3 hit = origin + dir * t;
+            glm::vec3 offset = hit - gLastDragHit;
+            offset -= gDragPlaneNormal * glm::dot(offset, gDragPlaneNormal);
+            glm::vec3 np = gLastDragPos + offset;
+            if (gSelLight >= 0 && np.y < 0.2f) np.y = 0.2f;
+            gLastDragHit = hit;
+            gLastDragPos = np;
+            SetSelPos(np);
+        }
+        return;
+    }
     if (!gRightMouseDown) return;
     if (gFirstMouse)
     {
