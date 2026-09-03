@@ -51,6 +51,7 @@ bool   gShowGrid = true;
 bool   gShowSky = true;
 bool gSunFollowLight = false;   // 天空太阳是否跟随第一盏灯
 bool gToon = true;   // 卡通/赛璐璐着色开关
+bool gOutline = true;   // 屏幕空间黑色描边开关
 const int kMaxLights = 8;
 
 struct SceneModel
@@ -99,6 +100,9 @@ double gLastInputTime = 0.0;   // 最近一次输入动作时间（防呆用）
 
 // 离屏渲染目标（3D 场景画到这里，再显示在 ImGui 视口面板里）
 GLuint gSceneFbo = 0, gSceneColorTex = 0, gSceneDepthRbo = 0;
+GLuint gSceneDepthTex = 0;                  // 可采样深度纹理（描边用）
+GLuint gPostFbo = 0, gPostTex = 0;          // 后处理输出（描边后画面）
+GLuint gPostVao = 0;
 int gFboW = 0, gFboH = 0;
 double gViewportMinX = 0.0, gViewportMinY = 0.0;   // 视口面板左上角（窗口坐标）
 int gViewportW = 0, gViewportH = 0;                // 视口面板尺寸
@@ -258,6 +262,53 @@ uniform vec3 uColor;
 void main()
 {
     FragColor = vec4(uColor, 1.0);
+}
+)";
+
+
+// 屏幕空间描边后处理（全屏三角形）
+const char* postVertSrc = R"(
+#version 330 core
+out vec2 vUv;
+void main()
+{
+    vec2 p = vec2(float((gl_VertexID << 1) & 2), float(gl_VertexID & 2));
+    vUv = p;
+    gl_Position = vec4(p * 2.0 - 1.0, 0.0, 1.0);
+}
+)";
+
+const char* postFragSrc = R"(
+#version 330 core
+in vec2 vUv;
+out vec4 FragColor;
+uniform sampler2D uScene;
+uniform sampler2D uDepth;
+uniform float uOutlineOn;
+
+float toLinear(float z)
+{
+    const float n = 0.05;
+    const float f = 500.0;
+    return (2.0 * n * f) / (f + n - (z * 2.0 - 1.0) * (f - n));
+}
+
+void main()
+{
+    vec3 col = texture(uScene, vUv).rgb;
+    if (uOutlineOn > 0.5)
+    {
+        vec2 texel = 1.0 / vec2(textureSize(uDepth, 0));
+        float c = toLinear(texture(uDepth, vUv).r);
+        float l = toLinear(texture(uDepth, vUv - vec2(texel.x, 0.0)).r);
+        float r = toLinear(texture(uDepth, vUv + vec2(texel.x, 0.0)).r);
+        float u = toLinear(texture(uDepth, vUv + vec2(0.0, texel.y)).r);
+        float d = toLinear(texture(uDepth, vUv - vec2(0.0, texel.y)).r);
+        float mag = abs(l - r) + abs(u - d);
+        float edge = smoothstep(0.02, 0.09, mag);
+        col = mix(col, vec3(0.02, 0.02, 0.03), edge * 0.85);
+    }
+    FragColor = vec4(col, 1.0);
 }
 )";
 
@@ -1162,6 +1213,7 @@ void SidebarUI()
     ImGui::SameLine();
     ImGui::Checkbox("太阳跟随光源", &gSunFollowLight);
     ImGui::Checkbox("卡通着色", &gToon);
+    ImGui::Checkbox("黑色描边", &gOutline);
     if (ImGui::Button("重置相机", ImVec2(-1, 0)))
     {
         gCamera = Camera();
@@ -1271,10 +1323,17 @@ void RecreateSceneTarget(int w, int h)
 {
     if (w <= 0 || h <= 0) return;
     if (gSceneColorTex) glDeleteTextures(1, &gSceneColorTex);
+    if (gSceneDepthTex) glDeleteTextures(1, &gSceneDepthTex);
+    if (gPostTex) glDeleteTextures(1, &gPostTex);
+    if (gPostFbo) glDeleteFramebuffers(1, &gPostFbo);
+    if (gSceneDepthTex) glDeleteTextures(1, &gSceneDepthTex);
     if (gSceneDepthRbo) glDeleteRenderbuffers(1, &gSceneDepthRbo);
     if (gSceneFbo) glDeleteFramebuffers(1, &gSceneFbo);
+    if (gPostTex) glDeleteTextures(1, &gPostTex);
+    if (gPostFbo) glDeleteFramebuffers(1, &gPostFbo);
     gFboW = w; gFboH = h;
 
+    // 场景颜色
     glGenTextures(1, &gSceneColorTex);
     glBindTexture(GL_TEXTURE_2D, gSceneColorTex);
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
@@ -1283,17 +1342,38 @@ void RecreateSceneTarget(int w, int h)
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 
-    glGenRenderbuffers(1, &gSceneDepthRbo);
-    glBindRenderbuffer(GL_RENDERBUFFER, gSceneDepthRbo);
-    glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT24, w, h);
+    // 场景深度（纹理，供描边采样）
+    glGenTextures(1, &gSceneDepthTex);
+    glBindTexture(GL_TEXTURE_2D, gSceneDepthTex);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT24, w, h, 0,
+                 GL_DEPTH_COMPONENT, GL_FLOAT, nullptr);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 
+    // 后处理颜色
+    glGenTextures(1, &gPostTex);
+    glBindTexture(GL_TEXTURE_2D, gPostTex);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+
+    // 场景 FBO：颜色 + 深度纹理
     glGenFramebuffers(1, &gSceneFbo);
     glBindFramebuffer(GL_FRAMEBUFFER, gSceneFbo);
     glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, gSceneColorTex, 0);
-    glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, gSceneDepthRbo);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, gSceneDepthTex, 0);
+
+    // 后处理 FBO
+    glGenFramebuffers(1, &gPostFbo);
+    glBindFramebuffer(GL_FRAMEBUFFER, gPostFbo);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, gPostTex, 0);
+
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
     glBindTexture(GL_TEXTURE_2D, 0);
-    glBindRenderbuffer(GL_RENDERBUFFER, 0);
 }
 
 
@@ -1358,8 +1438,9 @@ void ViewportUI()
     if (gViewportW < 8) gViewportW = 8;
     if (gViewportH < 8) gViewportH = 8;
 
-    if (gSceneColorTex)
-        ImGui::Image((ImTextureID)(intptr_t)gSceneColorTex,
+    GLuint displayTex = gPostTex ? gPostTex : gSceneColorTex;
+    if (displayTex)
+        ImGui::Image((ImTextureID)(intptr_t)displayTex,
                      ImVec2((float)gViewportW, (float)gViewportH),
                      ImVec2(0.0f, 1.0f), ImVec2(1.0f, 0.0f));  // 翻转 Y
     else
@@ -1446,6 +1527,8 @@ int main()
     Shader lineShader(lineVertSrc, lineFragSrc);
     Shader skyShader(skyVertSrc, skyFragSrc);
     Shader flatShader(flatVertSrc, flatFragSrc);
+    Shader postShader(postVertSrc, postFragSrc);
+    glGenVertexArrays(1, &gPostVao);
 
     worldShader.Use();
     worldShader.SetFloat("uShininess", 48.0f);
@@ -1759,6 +1842,29 @@ GLsizei axesCount = (GLsizei)(axesData.size() / 6);
             glDepthFunc(GL_LESS);
         }
 
+        // 屏幕空间描边后处理
+        if (gPostFbo && gSceneColorTex && gSceneDepthTex)
+        {
+            glDisable(GL_DEPTH_TEST);
+            glBindFramebuffer(GL_FRAMEBUFFER, gPostFbo);
+            glViewport(0, 0, gFboW, gFboH);
+            glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+            glClear(GL_COLOR_BUFFER_BIT);
+            postShader.Use();
+            glActiveTexture(GL_TEXTURE0);
+            glBindTexture(GL_TEXTURE_2D, gSceneColorTex);
+            glActiveTexture(GL_TEXTURE1);
+            glBindTexture(GL_TEXTURE_2D, gSceneDepthTex);
+            postShader.SetInt("uScene", 0);
+            postShader.SetInt("uDepth", 1);
+            postShader.SetFloat("uOutlineOn", gOutline ? 1.0f : 0.0f);
+            glBindVertexArray(gPostVao);
+            glDrawArrays(GL_TRIANGLES, 0, 3);
+            glBindVertexArray(0);
+            glBindFramebuffer(GL_FRAMEBUFFER, 0);
+            glEnable(GL_DEPTH_TEST);
+        }
+
         // 3D 场景已画进 FBO；切回默认缓冲渲染 ImGui
         glBindFramebuffer(GL_FRAMEBUFFER, 0);
         glViewport(0, 0, fbW, fbH);
@@ -1818,12 +1924,17 @@ GLsizei axesCount = (GLsizei)(axesData.size() / 6);
     glDeleteVertexArrays(1, &gridVao);
     glDeleteBuffers(1, &gridVbo);
 glDeleteVertexArrays(1, &axesVao);
+    if (gPostVao) glDeleteVertexArrays(1, &gPostVao);
     glDeleteBuffers(1, &axesVbo);
     glDeleteVertexArrays(1, &axesVao);
+    if (gPostVao) glDeleteVertexArrays(1, &gPostVao);
     glDeleteBuffers(1, &axesVbo);
     glDeleteVertexArrays(1, &boxEdgesVao);
     glDeleteBuffers(1, &boxEdgesVbo);
     if (gSceneColorTex) glDeleteTextures(1, &gSceneColorTex);
+    if (gSceneDepthTex) glDeleteTextures(1, &gSceneDepthTex);
+    if (gPostTex) glDeleteTextures(1, &gPostTex);
+    if (gPostFbo) glDeleteFramebuffers(1, &gPostFbo);
     if (gSceneDepthRbo) glDeleteRenderbuffers(1, &gSceneDepthRbo);
     if (gSceneFbo) glDeleteFramebuffers(1, &gSceneFbo);
     for (SceneModel& m : gModels) DestroyMesh(m.Vao, m.Vbo);
