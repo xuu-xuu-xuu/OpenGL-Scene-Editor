@@ -1,0 +1,18 @@
+# Visual Studio
+.vs/
+*.user
+*.suo
+
+# 编译输出（Debug/Release/x64 等）
+x64/
+Debug/
+Release/
+*.pdb
+*.ilk
+*.exp
+
+# ImGui 布局缓存（每次启动会重新生成）
+imgui.ini
+
+# 日志等
+*.log
