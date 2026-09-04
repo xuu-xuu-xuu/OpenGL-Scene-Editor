@@ -344,7 +344,8 @@ void main()
         float magN = length(nR - nL) * nl + length(nU - nD) * nu;
         float edgeN = smoothstep(0.10, 0.35, magN);
         float edge = max(edgeD, edgeN * 0.9);
-        col = mix(col, vec3(0.02, 0.02, 0.03), edge * 0.85);
+        float distFade = 1.0f - smoothstep(0.55f, 0.92f, c);   // 距离淡出描边
+        col = mix(col, vec3(0.02, 0.02, 0.03), edge * 0.55f * distFade);
     }
     FragColor = vec4(col, 1.0);
 }
