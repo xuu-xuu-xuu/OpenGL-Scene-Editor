@@ -63,7 +63,7 @@ float gShadowAmt = 0.35f;
 float gBandHi = 0.80f, gBandMid = 0.30f, gBandLo = 0.05f;
 glm::vec3 gSpecColor = glm::vec3(1.0f, 0.98f, 0.92f);
 float gRimAmt = 0.60f;
-float gFaceFill = 0.50f;
+float gFaceFill = 0.18f;
 float gSatAmt = 0.80f;
 float gBloomAmt = 0.12f;
 float gGrainAmt = 0.03f;
@@ -247,7 +247,7 @@ void main()
             if (uSoftShade > 0)
             {
                 // 脸/皮肤：柔和受光，暗部不会死黑
-                diff = 0.55f + 0.45f * smoothstep(0.10f, 0.62f, ndl);
+                diff = 0.48f + 0.40f * smoothstep(0.08f, 0.55f, ndl);   // 脸：与身体亮度协调
             }
             else
             {
@@ -275,7 +275,7 @@ void main()
         result += vec3(0.35f, 0.50f, 0.80f) * rim * uRimAmt;
         // 脸部补光：面向相机方向提亮，抹平生硬阴影
         if (uSoftShade > 0)
-            result += baseColor * max(dot(N, V), 0.0) * uFaceFill * 0.55f;
+            result += baseColor * max(dot(N, V), 0.0) * uFaceFill * 0.30f;
     }
     FragColor = vec4(result, 1.0);
 }
