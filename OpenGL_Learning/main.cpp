@@ -1431,6 +1431,38 @@ std::vector<float> MakeAxesData()
     return data;
 }
 
+// 灯头箭头（局部指向 -Y）
+std::vector<float> MakeArrowData()
+{
+    std::vector<float> data;
+    auto line = [&](float x0, float y0, float z0, float x1, float y1, float z1)
+    {
+        for (int k = 0; k < 2; ++k)
+        {
+            data.push_back(k == 0 ? x0 : x1);
+            data.push_back(k == 0 ? y0 : y1);
+            data.push_back(k == 0 ? z0 : z1);
+            data.push_back(1.0f); data.push_back(0.9f); data.push_back(0.4f);
+        }
+    };
+    line(0, 0, 0, 0, -1.0f, 0);
+    line(0, -1.0f, 0, -0.14f, -0.72f, 0);
+    line(0, -1.0f, 0,  0.14f, -0.72f, 0);
+    return data;
+}
+
+glm::mat3 AlignToDirection(const glm::vec3& dir)
+{
+    glm::vec3 d = glm::normalize(dir);
+    glm::vec3 from(0.0f, -1.0f, 0.0f);
+    float dotv = glm::clamp(glm::dot(from, d), -1.0f, 1.0f);
+    if (dotv > 0.999f) return glm::mat3(1.0f);
+    if (dotv < -0.999f) return glm::mat3(glm::rotate(glm::mat4(1.0f), 3.14159265f, glm::vec3(1, 0, 0)));
+    glm::vec3 axis = glm::cross(from, d);
+    float ang = acosf(dotv);
+    return glm::mat3(glm::rotate(glm::mat4(1.0f), ang, axis));
+}
+
 void DrawMesh(const Shader& shader, GLuint vao, GLsizei count,
               const glm::mat4& model, const glm::vec3& color)
 {
@@ -1883,7 +1915,11 @@ int main()
     std::vector<float> axesData = MakeAxesData();
     GLuint axesVao = 0, axesVbo = 0;
     UploadMesh(axesData, axesVao, axesVbo);
-GLsizei axesCount = (GLsizei)(axesData.size() / 6);
+    GLsizei axesCount = (GLsizei)(axesData.size() / 6);
+    std::vector<float> arrowData = MakeArrowData();
+    GLuint arrowVao = 0, arrowVbo = 0;
+    UploadMesh(arrowData, arrowVao, arrowVbo);
+    GLsizei arrowCount = (GLsizei)(arrowData.size() / 6);
 
     std::vector<float> boxEdgesData = MakeBoxEdgesData();
     GLuint boxEdgesVao = 0, boxEdgesVbo = 0;
@@ -2125,6 +2161,23 @@ GLsizei axesCount = (GLsizei)(axesData.size() / 6);
             glBindVertexArray(0);
         }
 
+        // 平行光/聚光灯：方向箭头
+        lineShader.Use();
+        lineShader.SetMat4("uView", view);
+        lineShader.SetMat4("uProj", proj);
+        for (int i = 0; i < (int)gLights.size(); ++i)
+        {
+            const SceneLight& l = gLights[i];
+            if (l.Type < 1) continue;
+            glm::mat4 am(1.0f);
+            am = glm::translate(am, l.Position);
+            am = am * glm::mat4(AlignToDirection(l.Direction));
+            am = glm::scale(am, glm::vec3(1.8f));
+            lineShader.SetMat4("uModel", am);
+            glBindVertexArray(arrowVao);
+            glDrawArrays(GL_LINES, 0, arrowCount);
+            glBindVertexArray(0);
+        }
         // 选中物体：中心小球 = 自由移动手柄
         if (HasSelection())
         {
@@ -2302,9 +2355,13 @@ GLsizei axesCount = (GLsizei)(axesData.size() / 6);
 glDeleteVertexArrays(1, &axesVao);
     if (gPostVao) glDeleteVertexArrays(1, &gPostVao);
     glDeleteBuffers(1, &axesVbo);
+    glDeleteVertexArrays(1, &arrowVao);
+    glDeleteBuffers(1, &arrowVbo);
     glDeleteVertexArrays(1, &axesVao);
     if (gPostVao) glDeleteVertexArrays(1, &gPostVao);
     glDeleteBuffers(1, &axesVbo);
+    glDeleteVertexArrays(1, &arrowVao);
+    glDeleteBuffers(1, &arrowVbo);
     glDeleteVertexArrays(1, &boxEdgesVao);
     glDeleteBuffers(1, &boxEdgesVbo);
     if (gSceneColorTex) glDeleteTextures(1, &gSceneColorTex);
