@@ -177,7 +177,7 @@ void main()
     vec3 N = normalize(vNormal);
     vec3 V = normalize(uViewPos - vWorldPos);
     vec3 baseColor = (uUseTex > 0) ? texture(uTex, vUV).rgb : uColor;
-    vec3 result = 0.10f * baseColor;
+    vec3 result = (0.16f + 0.08f * max(N.y, 0.0f)) * baseColor;   // 环境+天光填充
     for (int i = 0; i < kMaxLights; ++i)
     {
         if (i >= uLightCount) break;
@@ -185,6 +185,7 @@ void main()
         vec3 H = normalize(L + V);
         float dist  = length(uLightPos[i] - vWorldPos);
         float atten = 1.0f / (1.0f + 0.09f * dist + 0.05f * dist * dist);
+        if (atten < 0.18f) atten = 0.18f;   // 距离下限：远处不至于全黑
         float ndl = max(dot(N, L), 0.0);
         float diff = ndl;
         if (uToon > 0.5f)
