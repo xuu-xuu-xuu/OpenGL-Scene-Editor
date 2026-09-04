@@ -64,6 +64,7 @@ struct ModelSubMesh
 {
     GLuint TexId = 0;
     bool HasTexture = false;
+    bool SoftShade = false;   // 脸/皮肤等材质用柔光
     unsigned int Start = 0;
     unsigned int Count = 0;
 };
@@ -167,6 +168,7 @@ out vec4 FragColor;
 uniform vec3 uColor;
 uniform sampler2D uTex;
 uniform int uUseTex;
+uniform int uSoftShade;
 uniform vec3 uViewPos;
 uniform float uShininess;
 uniform float uToon;
@@ -223,9 +225,17 @@ void main()
         float diff = ndl;
         if (uToon > 0.5f)
         {
-            diff = (ndl > 0.85f) ? 1.0f
-                 : (ndl > 0.35f) ? 0.72f
-                 : (ndl > 0.08f) ? 0.34f : 0.10f;
+            if (uSoftShade > 0)
+            {
+                // 脸/皮肤：柔和受光，暗部不会死黑
+                diff = 0.55f + 0.45f * smoothstep(0.10f, 0.62f, ndl);
+            }
+            else
+            {
+                diff = (ndl > 0.85f) ? 1.0f
+                     : (ndl > 0.35f) ? 0.72f
+                     : (ndl > 0.08f) ? 0.34f : 0.10f;
+            }
         }
         float ndh = max(dot(N, H), 0.0);
         float spec = pow(ndh, uShininess);
@@ -318,6 +328,7 @@ out vec4 FragColor;
 uniform vec3 uColor;
 uniform sampler2D uTex;
 uniform int uUseTex;
+uniform int uSoftShade;
 void main()
 {
     FragColor = vec4(uColor, 1.0);
@@ -529,6 +540,7 @@ void DrawModelRanges(const Shader& sh, const SceneModel& m,
     if (m.Subs.empty())
     {
         sh.SetInt("uUseTex", 0);
+        sh.SetInt("uSoftShade", 0);
         glDrawArrays(GL_TRIANGLES, 0, m.Count);
     }
     else
@@ -536,6 +548,7 @@ void DrawModelRanges(const Shader& sh, const SceneModel& m,
         for (const ModelSubMesh& sm : m.Subs)
         {
             sh.SetInt("uUseTex", sm.HasTexture ? 1 : 0);
+            sh.SetInt("uSoftShade", sm.SoftShade ? 1 : 0);
             if (sm.HasTexture)
             {
                 glActiveTexture(GL_TEXTURE0);
@@ -556,6 +569,7 @@ void DrawTexturedMesh(const Shader& shader, GLuint vao, GLsizei count,
     shader.SetMat3("uNormalMat", normalMat);
     shader.SetVec3("uColor", color);
     shader.SetInt("uUseTex", 1);
+    shader.SetInt("uSoftShade", 0);
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, tex);
     glBindVertexArray(vao);
@@ -666,6 +680,11 @@ int AddModelFile(const std::string& path)
         ModelSubMesh sm;
         sm.HasTexture = false;
         auto it = texByMat.find(r.Material);
+        std::string mn = r.Material;
+        for (auto& ch : mn) ch = (char)tolower(ch);
+        if (mn.find("face") != std::string::npos || mn.find("skin") != std::string::npos ||
+            mn.find("cheek") != std::string::npos || mn.find("head") != std::string::npos)
+            sm.SoftShade = true;
         if (it != texByMat.end() && !it->second.empty())
         {
             std::string texRel = it->second;
@@ -1498,6 +1517,7 @@ void DrawMesh(const Shader& shader, GLuint vao, GLsizei count,
     shader.SetMat3("uNormalMat", normalMat);
     shader.SetVec3("uColor", color);
     shader.SetInt("uUseTex", 0);
+    shader.SetInt("uSoftShade", 0);
     glBindVertexArray(vao);
     glDrawArrays(GL_TRIANGLES, 0, count);
     glBindVertexArray(0);
