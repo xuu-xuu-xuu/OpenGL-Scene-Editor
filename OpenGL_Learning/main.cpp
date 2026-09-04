@@ -58,6 +58,14 @@ bool gSunFollowLight = false;   // 天空太阳是否跟随第一盏灯
 bool gToon = true;   // 卡通/赛璐璐着色开关
 bool gOutline = true;   // 屏幕空间黑色描边开关
 bool gGrade = true;   // 后期调色（降饱和/抬黑位/暗角）
+glm::vec3 gShadowTint = glm::vec3(0.42f, 0.38f, 0.62f);   // 暗部色温（偏紫）
+float gShadowAmt = 0.35f;
+float gBandHi = 0.80f, gBandMid = 0.30f, gBandLo = 0.05f;
+glm::vec3 gSpecColor = glm::vec3(1.0f, 0.98f, 0.92f);
+float gRimAmt = 0.40f;
+float gSatAmt = 0.80f;
+float gBloomAmt = 0.12f;
+float gGrainAmt = 0.03f;
 const int kMaxLights = 8;
 
 struct ModelSubMesh
@@ -232,9 +240,9 @@ void main()
             }
             else
             {
-                diff = (ndl > 0.80f) ? 1.0f
-                     : (ndl > 0.30f) ? 0.64f
-                     : (ndl > 0.05f) ? 0.32f : 0.14f;
+                diff = (ndl > uBandHi) ? 1.0f
+                     : (ndl > uBandMid) ? 0.64f
+                     : (ndl > uBandLo) ? 0.32f : 0.14f;
             }
         }
         float ndh = max(dot(N, H), 0.0);
@@ -243,12 +251,14 @@ void main()
             spec = smoothstep(0.36f, 0.48f, ndh) * pow(ndh, 240.0f) * 0.7f;
 
         vec3 radiance = uLightColor[i] * uLightIntensity[i] * atten;
-        result += radiance * (diff * baseColor + spec * vec3(0.9f));
+                result += radiance * (diff * baseColor + spec * uSpecColor);
+        float darkAmt = (uToon > 0.5f) ? clamp(1.0f - diff, 0.0f, 1.0f) : 0.0f;
+        result += radiance * uShadowTint * darkAmt * uShadowAmt * 0.35f;
     }
     if (uToon > 0.5f)
     {
         float rim = pow(1.0 - max(dot(N, V), 0.0), 3.0);
-        result += vec3(0.32f, 0.42f, 0.62f) * rim * 0.40f;
+        result += vec3(0.32f, 0.42f, 0.62f) * rim * uRimAmt;
     }
     FragColor = vec4(result, 1.0);
 }
@@ -362,6 +372,10 @@ uniform sampler2D uDepth;
 uniform sampler2D uNormal;
 uniform float uOutlineOn;
 uniform float uGradeOn;
+uniform float uSatAmt;
+uniform float uTime;
+uniform float uBloomAmt;
+uniform float uGrainAmt;
 
 float toLinear(float z)
 {
@@ -399,7 +413,7 @@ void main()
     if (uGradeOn > 0.5)
     {
         float luma = dot(col, vec3(0.299, 0.587, 0.114));
-        col = mix(vec3(luma), col, 0.80);
+        col = mix(vec3(luma), col, uSatAmt);
         col = col * 0.97 + 0.028;
         col *= vec3(1.015f, 1.0f, 0.965f);   // 轻微暖调，统一画面
 
@@ -412,6 +426,24 @@ void main()
         float lap = abs(2.0 * gc - gl - gr) + abs(2.0 * gc - gu - gd);
         col *= 1.0 - smoothstep(0.002, 0.02, lap) * 0.30;   // 凹处伪AO
 
+        // 柔和泛光（亮部扩散）
+        vec3 glow = vec3(0.0);
+        float gw = 0.0;
+        for (int k = -1; k <= 1; ++k)
+        {
+            for (int m = -1; m <= 1; ++m)
+            {
+                if (k == 0 && m == 0) continue;
+                vec3 s = texture(uScene, vUv + vec2((float)k, (float)m) * gtex * 2.0).rgb;
+                glow += max(s - vec3(0.85), vec3(0.0));
+                gw += 1.0;
+            }
+        }
+        col += (glow / max(gw, 1.0)) * uBloomAmt;
+        // 噪点颗粒
+        float nh = fract(sin(dot(vUv * 100.0 + uTime, vec2(12.9898, 78.233))) * 43758.5453);
+        col += (nh - 0.5) * uGrainAmt;
+        vec2 q = vUv - 0.5;
         vec2 q = vUv - 0.5;
         float vig = smoothstep(0.45, 1.15, length(q) * 1.45);
         col *= 1.0 - vig * 0.38;   // 暗角
@@ -1622,6 +1654,16 @@ void SidebarUI()
         gCamera.UpdateVectors();
         gFov = 50.0f;
     }
+    ImGui::SeparatorText("风格化参数");
+    ImGui::ColorEdit3("暗部色温", &gShadowTint.x);
+    ImGui::SliderFloat("色温强度", &gShadowAmt, 0.0f, 1.0f);
+    ImGui::SliderFloat("亮部断点", &gBandHi, 0.5f, 1.0f);
+    ImGui::SliderFloat("中间断点", &gBandMid, 0.1f, 0.6f);
+    ImGui::SliderFloat("暗部断点", &gBandLo, 0.0f, 0.3f);
+    ImGui::SliderFloat("边缘光", &gRimAmt, 0.0f, 1.0f);
+    ImGui::SliderFloat("饱和度", &gSatAmt, 0.0f, 1.2f);
+    ImGui::SliderFloat("泛光", &gBloomAmt, 0.0f, 0.6f);
+    ImGui::SliderFloat("颗粒", &gGrainAmt, 0.0f, 0.12f);
     ImGui::SeparatorText("动作");
     if (ImGui::Button("添加模型...", ImVec2(-1, 0)))
     {
@@ -2157,6 +2199,13 @@ int main()
         worldShader.SetMat4("uProj", proj);
         worldShader.SetVec3("uViewPos", gCamera.Position);
         worldShader.SetFloat("uToon", gToon ? 1.0f : 0.0f);
+        worldShader.SetFloat("uBandHi", gBandHi);
+        worldShader.SetFloat("uBandMid", gBandMid);
+        worldShader.SetFloat("uBandLo", gBandLo);
+        worldShader.SetVec3("uShadowTint", gShadowTint);
+        worldShader.SetFloat("uShadowAmt", gShadowAmt);
+        worldShader.SetVec3("uSpecColor", gSpecColor);
+        worldShader.SetFloat("uRimAmt", gRimAmt);
 
         int lightCount = (int)gLights.size();
         if (lightCount > kMaxLights) lightCount = kMaxLights;
@@ -2378,6 +2427,10 @@ int main()
             postShader.SetInt("uNormal", 2);
             postShader.SetFloat("uOutlineOn", gOutline ? 1.0f : 0.0f);
             postShader.SetFloat("uGradeOn", gGrade ? 1.0f : 0.0f);
+            postShader.SetFloat("uSatAmt", gSatAmt);
+            postShader.SetFloat("uTime", (float)glfwGetTime());
+            postShader.SetFloat("uBloomAmt", gBloomAmt);
+            postShader.SetFloat("uGrainAmt", gGrainAmt);
             glBindVertexArray(gPostVao);
             glDrawArrays(GL_TRIANGLES, 0, 3);
             glBindVertexArray(0);
