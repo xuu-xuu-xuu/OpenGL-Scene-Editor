@@ -1,13 +1,4 @@
-﻿        vec2 gtex = 1.0 / vec2(textureSize(uDepth, 0));
-        float gc = texture(uDepth, vUv).r;
-        float gl = texture(uDepth, vUv - vec2(gtex.x, 0.0)).r;
-        float gr = texture(uDepth, vUv + vec2(gtex.x, 0.0)).r;
-        float gu = texture(uDepth, vUv + vec2(0.0, gtex.y)).r;
-        float gd = texture(uDepth, vUv - vec2(0.0, gtex.y)).r;
-        float lap = abs(2.0 * gc - gl - gr) + abs(2.0 * gc - gu - gd);
-        col *= 1.0 - smoothstep(0.002, 0.02, lap) * 0.30;   // 凹处伪AO
-}
-// ============================================================
+﻿// ============================================================
 // OpenGL 场景编辑器（迷你引擎 + ImGui 侧边栏）
 // 多模型 / 多光源 / 选择移动 / 世界·本地坐标 Gizmo
 //
@@ -404,6 +395,26 @@ void main()
         float edge = max(edgeD, edgeN * 0.9);
         float distFade = 1.0f - smoothstep(0.55f, 0.92f, c);   // 距离淡出描边
         col = mix(col, vec3(0.10, 0.10, 0.12), edge * 0.45f * distFade);
+    }
+    if (uGradeOn > 0.5)
+    {
+        float luma = dot(col, vec3(0.299, 0.587, 0.114));
+        col = mix(vec3(luma), col, 0.80);
+        col = col * 0.97 + 0.028;
+        col *= vec3(1.015f, 1.0f, 0.965f);   // 轻微暖调，统一画面
+
+        vec2 gtex = 1.0 / vec2(textureSize(uDepth, 0));
+        float gc = texture(uDepth, vUv).r;
+        float gl = texture(uDepth, vUv - vec2(gtex.x, 0.0)).r;
+        float gr = texture(uDepth, vUv + vec2(gtex.x, 0.0)).r;
+        float gu = texture(uDepth, vUv + vec2(0.0, gtex.y)).r;
+        float gd = texture(uDepth, vUv - vec2(0.0, gtex.y)).r;
+        float lap = abs(2.0 * gc - gl - gr) + abs(2.0 * gc - gu - gd);
+        col *= 1.0 - smoothstep(0.002, 0.02, lap) * 0.30;   // 凹处伪AO
+
+        vec2 q = vUv - 0.5;
+        float vig = smoothstep(0.45, 1.15, length(q) * 1.45);
+        col *= 1.0 - vig * 0.38;   // 暗角
     }
     FragColor = vec4(col, 1.0);
 }
