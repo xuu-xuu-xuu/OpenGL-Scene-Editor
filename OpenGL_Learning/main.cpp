@@ -251,15 +251,17 @@ void main()
             }
             else
             {
-                diff = (ndl > uBandHi) ? 1.0f
-                     : (ndl > uBandMid) ? 0.64f
-                     : (ndl > uBandLo) ? 0.32f : 0.14f;
+                float bLo = mix(0.14f, 0.32f, smoothstep(uBandLo - 0.015f, uBandLo + 0.015f, ndl));
+                float bMid = mix(bLo, 0.64f, smoothstep(uBandMid - 0.025f, uBandMid + 0.025f, ndl));
+                diff = mix(bMid, 1.0f, smoothstep(uBandHi - 0.03f, uBandHi + 0.03f, ndl));
             }
         }
         float ndh = max(dot(N, H), 0.0);
         float spec = pow(ndh, uShininess);
         if (uToon > 0.5f)
             spec = smoothstep(0.36f, 0.48f, ndh) * pow(ndh, 240.0f) * 0.7f;
+            spec = smoothstep(0.46f, 0.56f, ndh) * pow(ndh, 340.0f) * 0.55f;   // 高光更小更硬
+            if (uSoftShade > 0) spec *= 0.25f;   // 脸/皮肤哑光，去塑料感
 
         vec3 radiance = uLightColor[i] * uLightIntensity[i] * atten;
                 result += radiance * (diff * baseColor + spec * uSpecColor);
@@ -419,8 +421,8 @@ void main()
                 float nl = (c < 0.995f && l < 0.995f) ? 1.0f : 0.0f;   // 左右两侧都是几何体才允许法线折痕
         float nu = (c < 0.995f && u < 0.995f) ? 1.0f : 0.0f;
         float magN = length(nR - nL) * nl + length(nU - nD) * nu;
-        float edgeN = smoothstep(0.14, 0.50, magN);
-        float edge = max(edgeD, edgeN * 0.6);
+        float edgeN = smoothstep(0.18, 0.60, magN);
+        float edge = max(edgeD, edgeN * 0.45);
         float distFade = 1.0f - smoothstep(0.55f, 0.92f, c);   // 距离淡出描边
         col = mix(col, vec3(0.08, 0.09, 0.16), edge * 0.50f * distFade);   // 深蓝灰描边
     }
@@ -438,7 +440,7 @@ void main()
         float gu = texture(uDepth, vUv + vec2(0.0, gtex.y)).r;
         float gd = texture(uDepth, vUv - vec2(0.0, gtex.y)).r;
         float lap = abs(2.0 * gc - gl - gr) + abs(2.0 * gc - gu - gd);
-        col *= 1.0 - smoothstep(0.004, 0.03, lap) * 0.14;   // 凹处伪AO（降噪）
+        col *= 1.0 - smoothstep(0.003, 0.025, lap) * 0.22;   // 凹处伪AO
 
         // 柔和泛光（4 方向采样，展开写避免解析问题）
         vec2 d1 = vec2(gtex.x * 2.0, 0.0);
