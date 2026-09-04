@@ -339,7 +339,9 @@ void main()
         vec3 nR = texture(uNormal, vUv + vec2(texel.x, 0.0)).rgb * 2.0 - 1.0;
         vec3 nU = texture(uNormal, vUv + vec2(0.0, texel.y)).rgb * 2.0 - 1.0;
         vec3 nD = texture(uNormal, vUv - vec2(0.0, texel.y)).rgb * 2.0 - 1.0;
-        float magN = length(nR - nL) + length(nU - nD);
+                float nl = (c < 0.995f && l < 0.995f) ? 1.0f : 0.0f;   // 左右两侧都是几何体才允许法线折痕
+        float nu = (c < 0.995f && u < 0.995f) ? 1.0f : 0.0f;
+        float magN = length(nR - nL) * nl + length(nU - nD) * nu;
         float edgeN = smoothstep(0.10, 0.35, magN);
         float edge = max(edgeD, edgeN * 0.9);
         col = mix(col, vec3(0.02, 0.02, 0.03), edge * 0.85);
