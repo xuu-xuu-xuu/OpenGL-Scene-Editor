@@ -1451,6 +1451,33 @@ std::vector<float> MakeArrowData()
     return data;
 }
 
+
+// 聚光灯外锥线框：apex 在原点，指向 -Y，底圆半径 1（距离 1 处）
+std::vector<float> MakeSpotConeData()
+{
+    std::vector<float> data;
+    auto add = [&](float x0, float y0, float z0, float x1, float y1, float z1)
+    {
+        for (int k = 0; k < 2; ++k)
+        {
+            data.push_back(k == 0 ? x0 : x1);
+            data.push_back(k == 0 ? y0 : y1);
+            data.push_back(k == 0 ? z0 : z1);
+            data.push_back(0.55f); data.push_back(0.85f); data.push_back(1.0f);
+        }
+    };
+    const int seg = 10;
+    for (int i = 0; i < seg; ++i)
+    {
+        float a0 = (float)i / seg * 2.0f * 3.14159265f;
+        float a1 = (float)((i + 1) % seg) / seg * 2.0f * 3.14159265f;
+        float cx0 = cosf(a0), cz0 = sinf(a0);
+        float cx1 = cosf(a1), cz1 = sinf(a1);
+        add(0, 0, 0, cx0, -1.0f, cz0);          // 伞骨
+        add(cx0, -1.0f, cz0, cx1, -1.0f, cz1);  // 底圈
+    }
+    return data;
+}
 glm::mat3 AlignToDirection(const glm::vec3& dir)
 {
     glm::vec3 d = glm::normalize(dir);
@@ -1920,6 +1947,10 @@ int main()
     GLuint arrowVao = 0, arrowVbo = 0;
     UploadMesh(arrowData, arrowVao, arrowVbo);
     GLsizei arrowCount = (GLsizei)(arrowData.size() / 6);
+    std::vector<float> coneData = MakeSpotConeData();
+    GLuint coneVao = 0, coneVbo = 0;
+    UploadMesh(coneData, coneVao, coneVbo);
+    GLsizei coneCount = (GLsizei)(coneData.size() / 6);
 
     std::vector<float> boxEdgesData = MakeBoxEdgesData();
     GLuint boxEdgesVao = 0, boxEdgesVbo = 0;
@@ -2177,6 +2208,21 @@ int main()
             glBindVertexArray(arrowVao);
             glDrawArrays(GL_LINES, 0, arrowCount);
             glBindVertexArray(0);
+            // 聚光灯：外锥可视化
+            if (l.Type == 2)
+            {
+                float len = 1.8f;
+                float tr = tanf(glm::radians(std::max(l.OuterDeg, 0.5f))) * len;
+                glm::mat4 cm(1.0f);
+                cm = glm::translate(cm, l.Position);
+                cm = cm * glm::mat4(AlignToDirection(l.Direction));
+                cm = glm::scale(cm, glm::vec3(tr, len, tr));
+                lineShader.SetMat4("uModel", cm);
+                glBindVertexArray(coneVao);
+                glDrawArrays(GL_LINES, 0, coneCount);
+                glBindVertexArray(0);
+            }
+            glBindVertexArray(0);
         }
         // 选中物体：中心小球 = 自由移动手柄
         if (HasSelection())
@@ -2357,11 +2403,15 @@ glDeleteVertexArrays(1, &axesVao);
     glDeleteBuffers(1, &axesVbo);
     glDeleteVertexArrays(1, &arrowVao);
     glDeleteBuffers(1, &arrowVbo);
+    glDeleteVertexArrays(1, &coneVao);
+    glDeleteBuffers(1, &coneVbo);
     glDeleteVertexArrays(1, &axesVao);
     if (gPostVao) glDeleteVertexArrays(1, &gPostVao);
     glDeleteBuffers(1, &axesVbo);
     glDeleteVertexArrays(1, &arrowVao);
     glDeleteBuffers(1, &arrowVbo);
+    glDeleteVertexArrays(1, &coneVao);
+    glDeleteBuffers(1, &coneVbo);
     glDeleteVertexArrays(1, &boxEdgesVao);
     glDeleteBuffers(1, &boxEdgesVbo);
     if (gSceneColorTex) glDeleteTextures(1, &gSceneColorTex);
