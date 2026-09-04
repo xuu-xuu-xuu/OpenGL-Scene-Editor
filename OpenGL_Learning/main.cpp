@@ -1,4 +1,13 @@
-﻿// ============================================================
+﻿        vec2 gtex = 1.0 / vec2(textureSize(uDepth, 0));
+        float gc = texture(uDepth, vUv).r;
+        float gl = texture(uDepth, vUv - vec2(gtex.x, 0.0)).r;
+        float gr = texture(uDepth, vUv + vec2(gtex.x, 0.0)).r;
+        float gu = texture(uDepth, vUv + vec2(0.0, gtex.y)).r;
+        float gd = texture(uDepth, vUv - vec2(0.0, gtex.y)).r;
+        float lap = abs(2.0 * gc - gl - gr) + abs(2.0 * gc - gu - gd);
+        col *= 1.0 - smoothstep(0.002, 0.02, lap) * 0.30;   // 凹处伪AO
+}
+// ============================================================
 // OpenGL 场景编辑器（迷你引擎 + ImGui 侧边栏）
 // 多模型 / 多光源 / 选择移动 / 世界·本地坐标 Gizmo
 //
@@ -232,18 +241,23 @@ void main()
             }
             else
             {
-                diff = (ndl > 0.85f) ? 1.0f
-                     : (ndl > 0.35f) ? 0.72f
-                     : (ndl > 0.08f) ? 0.34f : 0.10f;
+                diff = (ndl > 0.80f) ? 1.0f
+                     : (ndl > 0.30f) ? 0.64f
+                     : (ndl > 0.05f) ? 0.32f : 0.14f;
             }
         }
         float ndh = max(dot(N, H), 0.0);
         float spec = pow(ndh, uShininess);
         if (uToon > 0.5f)
-            spec = smoothstep(0.30f, 0.42f, ndh) * pow(ndh, 160.0f);
+            spec = smoothstep(0.36f, 0.48f, ndh) * pow(ndh, 240.0f) * 0.7f;
 
         vec3 radiance = uLightColor[i] * uLightIntensity[i] * atten;
         result += radiance * (diff * baseColor + spec * vec3(0.9f));
+    }
+    if (uToon > 0.5f)
+    {
+        float rim = pow(1.0 - max(dot(N, V), 0.0), 3.0);
+        result += vec3(0.32f, 0.42f, 0.62f) * rim * 0.40f;
     }
     FragColor = vec4(result, 1.0);
 }
@@ -389,7 +403,7 @@ void main()
         float edgeN = smoothstep(0.10, 0.35, magN);
         float edge = max(edgeD, edgeN * 0.9);
         float distFade = 1.0f - smoothstep(0.55f, 0.92f, c);   // 距离淡出描边
-        col = mix(col, vec3(0.02, 0.02, 0.03), edge * 0.55f * distFade);
+        col = mix(col, vec3(0.10, 0.10, 0.12), edge * 0.45f * distFade);
     }
     FragColor = vec4(col, 1.0);
 }
