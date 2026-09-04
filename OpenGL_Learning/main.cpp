@@ -62,7 +62,8 @@ glm::vec3 gShadowTint = glm::vec3(0.42f, 0.38f, 0.62f);   // 暗部色温（偏�
 float gShadowAmt = 0.35f;
 float gBandHi = 0.80f, gBandMid = 0.30f, gBandLo = 0.05f;
 glm::vec3 gSpecColor = glm::vec3(1.0f, 0.98f, 0.92f);
-float gRimAmt = 0.40f;
+float gRimAmt = 0.60f;
+float gFaceFill = 0.50f;
 float gSatAmt = 0.80f;
 float gBloomAmt = 0.12f;
 float gGrainAmt = 0.03f;
@@ -187,6 +188,7 @@ uniform vec3 uShadowTint;
 uniform float uShadowAmt;
 uniform vec3 uSpecColor;
 uniform float uRimAmt;
+uniform float uFaceFill;
 const int kMaxLights = 8;
 uniform int uLightCount;
 uniform vec3 uLightPos[kMaxLights];
@@ -202,7 +204,9 @@ void main()
     vec3 N = normalize(vNormal);
     vec3 V = normalize(uViewPos - vWorldPos);
     vec3 baseColor = (uUseTex > 0) ? texture(uTex, vUV).rgb : uColor;
-    vec3 result = (0.16f + 0.08f * max(N.y, 0.0f)) * baseColor;   // 环境+天光填充
+    vec3 result = (uToon > 0.5f)
+        ? vec3(0.20f, 0.19f, 0.21f) * baseColor
+        : (0.16f + 0.08f * max(N.y, 0.0f)) * baseColor;
     for (int i = 0; i < kMaxLights; ++i)
     {
         if (i >= uLightCount) break;
@@ -266,6 +270,10 @@ void main()
     {
         float rim = pow(1.0 - max(dot(N, V), 0.0), 3.0);
         result += vec3(0.32f, 0.42f, 0.62f) * rim * uRimAmt;
+        result += vec3(0.35f, 0.50f, 0.80f) * rim * uRimAmt;
+        // 脸部补光：面向相机方向提亮，抹平生硬阴影
+        if (uSoftShade > 0)
+            result += baseColor * max(dot(N, V), 0.0) * uFaceFill * 0.55f;
     }
     FragColor = vec4(result, 1.0);
 }
@@ -357,7 +365,6 @@ void main()
 }
 )";
 
-
 // 屏幕空间描边后处理（全屏三角形）
 const char* postVertSrc = R"(
 #version 330 core
@@ -412,10 +419,10 @@ void main()
                 float nl = (c < 0.995f && l < 0.995f) ? 1.0f : 0.0f;   // 左右两侧都是几何体才允许法线折痕
         float nu = (c < 0.995f && u < 0.995f) ? 1.0f : 0.0f;
         float magN = length(nR - nL) * nl + length(nU - nD) * nu;
-        float edgeN = smoothstep(0.10, 0.35, magN);
-        float edge = max(edgeD, edgeN * 0.9);
+        float edgeN = smoothstep(0.14, 0.50, magN);
+        float edge = max(edgeD, edgeN * 0.6);
         float distFade = 1.0f - smoothstep(0.55f, 0.92f, c);   // 距离淡出描边
-        col = mix(col, vec3(0.10, 0.10, 0.12), edge * 0.45f * distFade);
+        col = mix(col, vec3(0.08, 0.09, 0.16), edge * 0.50f * distFade);   // 深蓝灰描边
     }
     if (uGradeOn > 0.5)
     {
@@ -431,7 +438,7 @@ void main()
         float gu = texture(uDepth, vUv + vec2(0.0, gtex.y)).r;
         float gd = texture(uDepth, vUv - vec2(0.0, gtex.y)).r;
         float lap = abs(2.0 * gc - gl - gr) + abs(2.0 * gc - gu - gd);
-        col *= 1.0 - smoothstep(0.002, 0.02, lap) * 0.30;   // 凹处伪AO
+        col *= 1.0 - smoothstep(0.004, 0.03, lap) * 0.14;   // 凹处伪AO（降噪）
 
         // 柔和泛光（4 方向采样，展开写避免解析问题）
         vec2 d1 = vec2(gtex.x * 2.0, 0.0);
@@ -452,7 +459,6 @@ void main()
     FragColor = vec4(col, 1.0);
 }
 )";
-
 
 // 法线通道：把视空间法线写入场景 FBO 的 COLOR_ATTACHMENT1
 const char* normalVertSrc = R"(
@@ -533,7 +539,6 @@ void DestroyMesh(GLuint& vao, GLuint& vbo)
     if (vbo) glDeleteBuffers(1, &vbo);
     vao = 0; vbo = 0;
 }
-
 
 // 8 float/顶点（位置+法线+UV）上传
 void UploadMeshUV(const std::vector<float>& data, GLuint& vao, GLuint& vbo)
@@ -918,7 +923,6 @@ void ScreenToRay(GLFWwindow* window, const glm::mat4& view, const glm::mat4& pro
     dir = glm::normalize(farP - nearP);
 }
 
-
 // 拖动专用射线：允许鼠标越过黑边/场景矩形继续延伸，避免快速拖动“脱手”
 void DragRay(GLFWwindow* window, const glm::mat4& view, const glm::mat4& proj,
              double lx, double ly, glm::vec3& origin, glm::vec3& dir)
@@ -1251,7 +1255,6 @@ void MouseButtonCallback(GLFWwindow* window, int button, int action, int mods)
             { bestT = t; bestLight = -1; bestModel = i; }
         }
 
-
         // 远距离小目标：射线未命中时做屏幕空间就近兜底
         if (bestLight < 0 && bestModel < 0)
         {
@@ -1444,7 +1447,6 @@ std::vector<float> MakeSphereData(int segments, int rings)
     auto push = [&](const glm::vec3& p)
     {
         data.push_back(p.x); data.push_back(p.y); data.push_back(p.z);
-        data.push_back(p.x); data.push_back(p.y); data.push_back(p.z);
     };
     for (int j = 0; j < rings; ++j)
     {
@@ -1527,7 +1529,6 @@ std::vector<float> MakeArrowData()
     line(0, -1.0f, 0,  0.14f, -0.72f, 0);
     return data;
 }
-
 
 // 聚光灯外锥线框：apex 在原点，指向 -Y，底圆半径 1（距离 1 处）
 std::vector<float> MakeSpotConeData()
@@ -1662,6 +1663,9 @@ void SidebarUI()
     ImGui::SliderFloat("中间断点", &gBandMid, 0.1f, 0.6f);
     ImGui::SliderFloat("暗部断点", &gBandLo, 0.0f, 0.3f);
     ImGui::SliderFloat("边缘光", &gRimAmt, 0.0f, 1.0f);
+    ImGui::SliderFloat("脸部补光", &gFaceFill, 0.0f, 1.0f);
+    ImGui::SliderFloat("边缘光", &gRimAmt, 0.0f, 1.0f);
+    ImGui::SliderFloat("脸部补光", &gFaceFill, 0.0f, 1.0f);
     ImGui::SliderFloat("饱和度", &gSatAmt, 0.0f, 1.2f);
     ImGui::SliderFloat("泛光", &gBloomAmt, 0.0f, 0.6f);
     ImGui::SliderFloat("颗粒", &gGrainAmt, 0.0f, 0.12f);
@@ -1851,7 +1855,6 @@ void RecreateSceneTarget(int w, int h)
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
     glBindTexture(GL_TEXTURE_2D, 0);
 }
-
 
 // 由面板逻辑尺寸 + DPI 缩放，计算视口的 framebuffer 像素尺寸
 void UpdateViewportMetrics(GLFWwindow* window)
@@ -2207,6 +2210,9 @@ int main()
         worldShader.SetFloat("uShadowAmt", gShadowAmt);
         worldShader.SetVec3("uSpecColor", gSpecColor);
         worldShader.SetFloat("uRimAmt", gRimAmt);
+        worldShader.SetFloat("uFaceFill", gFaceFill);
+        worldShader.SetFloat("uRimAmt", gRimAmt);
+        worldShader.SetFloat("uFaceFill", gFaceFill);
 
         int lightCount = (int)gLights.size();
         if (lightCount > kMaxLights) lightCount = kMaxLights;
