@@ -444,7 +444,6 @@ void main()
         float nh = fract(sin(dot(vUv * 100.0 + uTime, vec2(12.9898, 78.233))) * 43758.5453);
         col += (nh - 0.5) * uGrainAmt;
         vec2 q = vUv - 0.5;
-        vec2 q = vUv - 0.5;
         float vig = smoothstep(0.45, 1.15, length(q) * 1.45);
         col *= 1.0 - vig * 0.38;   // 暗角
     }
