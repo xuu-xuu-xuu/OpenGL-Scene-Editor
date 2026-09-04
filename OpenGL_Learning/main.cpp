@@ -180,6 +180,13 @@ uniform int uSoftShade;
 uniform vec3 uViewPos;
 uniform float uShininess;
 uniform float uToon;
+uniform float uBandHi;
+uniform float uBandMid;
+uniform float uBandLo;
+uniform vec3 uShadowTint;
+uniform float uShadowAmt;
+uniform vec3 uSpecColor;
+uniform float uRimAmt;
 const int kMaxLights = 8;
 uniform int uLightCount;
 uniform vec3 uLightPos[kMaxLights];
@@ -426,20 +433,15 @@ void main()
         float lap = abs(2.0 * gc - gl - gr) + abs(2.0 * gc - gu - gd);
         col *= 1.0 - smoothstep(0.002, 0.02, lap) * 0.30;   // 凹处伪AO
 
-        // 柔和泛光（亮部扩散）
+        // 柔和泛光（4 方向采样，展开写避免解析问题）
+        vec2 d1 = vec2(gtex.x * 2.0, 0.0);
+        vec2 d2 = vec2(0.0, gtex.y * 2.0);
         vec3 glow = vec3(0.0);
-        float gw = 0.0;
-        for (int k = -1; k <= 1; ++k)
-        {
-            for (int m = -1; m <= 1; ++m)
-            {
-                if (k == 0 && m == 0) continue;
-                vec3 s = texture(uScene, vUv + vec2((float)k, (float)m) * gtex * 2.0).rgb;
-                glow += max(s - vec3(0.85), vec3(0.0));
-                gw += 1.0;
-            }
-        }
-        col += (glow / max(gw, 1.0)) * uBloomAmt;
+        glow += max(texture(uScene, vUv - d1).rgb - vec3(0.85), vec3(0.0));
+        glow += max(texture(uScene, vUv + d1).rgb - vec3(0.85), vec3(0.0));
+        glow += max(texture(uScene, vUv - d2).rgb - vec3(0.85), vec3(0.0));
+        glow += max(texture(uScene, vUv + d2).rgb - vec3(0.85), vec3(0.0));
+        col += (glow * 0.25) * uBloomAmt;
         // 噪点颗粒
         float nh = fract(sin(dot(vUv * 100.0 + uTime, vec2(12.9898, 78.233))) * 43758.5453);
         col += (nh - 0.5) * uGrainAmt;
