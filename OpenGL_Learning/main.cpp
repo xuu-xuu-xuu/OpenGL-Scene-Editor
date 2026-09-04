@@ -90,6 +90,10 @@ struct SceneLight
     glm::vec3 Position = glm::vec3(-4.0f, 6.0f, 5.0f);
     glm::vec3 Color = glm::vec3(1.0f, 0.95f, 0.85f);
     float Intensity = 1.6f;
+    int Type = 0;   // 0=点光源 1=平行光 2=聚光灯
+    glm::vec3 Direction = glm::vec3(0.0f, -1.0f, 0.0f);
+    float InnerDeg = 20.0f;
+    float OuterDeg = 35.0f;
     bool Selected = false;
 };
 
@@ -171,6 +175,10 @@ uniform int uLightCount;
 uniform vec3 uLightPos[kMaxLights];
 uniform vec3 uLightColor[kMaxLights];
 uniform float uLightIntensity[kMaxLights];
+uniform float uLightTypeF[kMaxLights];
+uniform vec3 uLightDir[kMaxLights];
+uniform float uLightConeIn[kMaxLights];
+uniform float uLightConeOut[kMaxLights];
 
 void main()
 {
@@ -181,16 +189,40 @@ void main()
     for (int i = 0; i < kMaxLights; ++i)
     {
         if (i >= uLightCount) break;
-        vec3 L = normalize(uLightPos[i] - vWorldPos);
+
+        vec3 L;
+        float atten = 1.0f;
+        if (uLightTypeF[i] < 0.5f)
+        {
+            // 点光源：距离衰减
+            vec3 toL = uLightPos[i] - vWorldPos;
+            float dist = length(toL);
+            atten = 1.0f / (1.0f + 0.09f * dist + 0.05f * dist * dist);
+            if (atten < 0.18f) atten = 0.18f;
+            L = normalize(toL);
+        }
+        else if (uLightTypeF[i] < 1.5f)
+        {
+            // 平行光：只取方向，无衰减
+            L = normalize(uLightDir[i]);
+        }
+        else
+        {
+            // 聚光灯：距离衰减 + 锥角衰减
+            vec3 toL = uLightPos[i] - vWorldPos;
+            float dist = length(toL);
+            atten = 1.0f / (1.0f + 0.09f * dist + 0.05f * dist * dist);
+            if (atten < 0.18f) atten = 0.18f;
+            L = normalize(toL);
+            float cosA = max(dot(-L, normalize(uLightDir[i])), 0.0f);
+            atten *= smoothstep(uLightConeOut[i], uLightConeIn[i], cosA);
+        }
+
         vec3 H = normalize(L + V);
-        float dist  = length(uLightPos[i] - vWorldPos);
-        float atten = 1.0f / (1.0f + 0.09f * dist + 0.05f * dist * dist);
-        if (atten < 0.18f) atten = 0.18f;   // 距离下限：远处不至于全黑
         float ndl = max(dot(N, L), 0.0);
         float diff = ndl;
         if (uToon > 0.5f)
         {
-            // 三段式卡通阴影（亮/中/暗 + 极暗保持轮廓感）
             diff = (ndl > 0.85f) ? 1.0f
                  : (ndl > 0.35f) ? 0.72f
                  : (ndl > 0.08f) ? 0.34f : 0.10f;
@@ -198,7 +230,8 @@ void main()
         float ndh = max(dot(N, H), 0.0);
         float spec = pow(ndh, uShininess);
         if (uToon > 0.5f)
-            spec = smoothstep(0.30f, 0.42f, ndh) * pow(ndh, 160.0f);   // 锐利高光块
+            spec = smoothstep(0.30f, 0.42f, ndh) * pow(ndh, 160.0f);
+
         vec3 radiance = uLightColor[i] * uLightIntensity[i] * atten;
         result += radiance * (diff * baseColor + spec * vec3(0.9f));
     }
@@ -688,7 +721,7 @@ int AddTorus()
     return -1;
 }
 
-int AddLight()
+int AddLight(int type = 0)
 {
     if ((int)gLights.size() >= kMaxLights)
     {
@@ -696,6 +729,9 @@ int AddLight()
         return -1;
     }
     SceneLight l;
+    l.Type = type;
+    if (type == 1) l.Direction = glm::normalize(glm::vec3(0.35f, 0.8f, 0.45f));
+    if (type == 2) l.Direction = glm::vec3(0.0f, -1.0f, 0.0f);
     l.Position = gCamera.Position + gCamera.Front * 6.0f;
     l.Position.y = std::max(l.Position.y, 1.0f);
     gLights.push_back(l);
@@ -1494,6 +1530,8 @@ void SidebarUI()
     }
     if (ImGui::Button("添加圆环", ImVec2(-1, 0))) { int idx = AddTorus(); if (idx >= 0) SelectModel(idx); }
     if (ImGui::Button("添加灯光", ImVec2(-1, 0))) { int idx = AddLight(); if (idx >= 0) SelectLight(idx); }
+    if (ImGui::Button("添加平行光", ImVec2(-1, 0))) { int idx = AddLight(1); if (idx >= 0) SelectLight(idx); }
+    if (ImGui::Button("添加聚光灯", ImVec2(-1, 0))) { int idx = AddLight(2); if (idx >= 0) SelectLight(idx); }
     if (ImGui::Button("删除选中", ImVec2(-1, 0))) DeleteSelected();
     ImGui::End();
 }
@@ -1552,6 +1590,24 @@ void InspectorUI()
         if (ImGui::ColorEdit3("颜色", c))
             l.Color = glm::vec3(c[0], c[1], c[2]);
         ImGui::SliderFloat("强度", &l.Intensity, 0.1f, 10.0f);
+        const char* lightTypes[] = { "点光源", "平行光", "聚光灯" };
+        int lt = l.Type;
+        if (ImGui::Combo("类型", &lt, lightTypes, 3)) l.Type = lt;
+        if (l.Type >= 1)
+        {
+            float d[3] = { l.Direction.x, l.Direction.y, l.Direction.z };
+            if (ImGui::DragFloat3("方向", d, 0.05f))
+            {
+                glm::vec3 nd(d[0], d[1], d[2]);
+                if (glm::length(nd) > 0.001f) l.Direction = glm::normalize(nd);
+            }
+        }
+        if (l.Type == 2)
+        {
+            ImGui::SliderFloat("内锥角", &l.InnerDeg, 1.0f, 89.0f);
+            ImGui::SliderFloat("外锥角", &l.OuterDeg, 2.0f, 90.0f);
+            if (l.OuterDeg < l.InnerDeg) l.OuterDeg = l.InnerDeg;
+        }
     }
     else if (gSelModel >= 0 && gSelModel < (int)gModels.size())
     {
@@ -1996,16 +2052,28 @@ GLsizei axesCount = (GLsizei)(axesData.size() / 6);
         if (lightCount > 0)
         {
             std::vector<glm::vec3> posArr, colArr;
+            std::vector<float> typeArr, coneInArr, coneOutArr;
+            std::vector<glm::vec3> dirArr;
             std::vector<float> intArr;
             for (int i = 0; i < lightCount; ++i)
             {
                 posArr.push_back(gLights[i].Position);
                 colArr.push_back(gLights[i].Color);
                 intArr.push_back(gLights[i].Intensity);
+                typeArr.push_back((float)gLights[i].Type);
+                dirArr.push_back(gLights[i].Direction);
+                float cin = cos(glm::radians(std::min(gLights[i].InnerDeg, gLights[i].OuterDeg)));
+                float cout = cos(glm::radians(std::max(gLights[i].InnerDeg, gLights[i].OuterDeg)));
+                coneInArr.push_back(cin);
+                coneOutArr.push_back(cout);
             }
             worldShader.SetVec3Array("uLightPos", posArr.data(), lightCount);
             worldShader.SetVec3Array("uLightColor", colArr.data(), lightCount);
             worldShader.SetFloatArray("uLightIntensity", intArr.data(), lightCount);
+            worldShader.SetFloatArray("uLightTypeF", typeArr.data(), lightCount);
+            worldShader.SetVec3Array("uLightDir", dirArr.data(), lightCount);
+            worldShader.SetFloatArray("uLightConeIn", coneInArr.data(), lightCount);
+            worldShader.SetFloatArray("uLightConeOut", coneOutArr.data(), lightCount);
         }
 
         for (const BoxPlacement& box : boxes)
