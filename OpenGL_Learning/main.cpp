@@ -318,7 +318,7 @@ float toLinear(float z)
 {
     const float n = 0.05;
     const float f = 500.0;
-    return (2.0 * n * f) / (f + n - (z * 2.0 - 1.0) * (f - n));
+    return z;   // 原始非线性深度：远处深度差小，避免远处整片被当描边涂黑
 }
 
 void main()
@@ -333,7 +333,7 @@ void main()
         float u = toLinear(texture(uDepth, vUv + vec2(0.0, texel.y)).r);
         float d = toLinear(texture(uDepth, vUv - vec2(0.0, texel.y)).r);
         float mag = abs(l - r) + abs(u - d);
-        float edgeD = smoothstep(0.02, 0.09, mag);
+        float edgeD = smoothstep(0.004, 0.02, mag);   // 非线性深度阈值
         vec3 nC = texture(uNormal, vUv).rgb * 2.0 - 1.0;
         vec3 nL = texture(uNormal, vUv - vec2(texel.x, 0.0)).rgb * 2.0 - 1.0;
         vec3 nR = texture(uNormal, vUv + vec2(texel.x, 0.0)).rgb * 2.0 - 1.0;
