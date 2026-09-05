@@ -80,13 +80,13 @@
       <SDLCheck>true</SDLCheck>
       <PreprocessorDefinitions>WIN32;_DEBUG;_CONSOLE;GLEW_STATIC;IMGUI_IMPL_OPENGL_LOADER_GLFW;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
-      <AdditionalIncludeDirectories>D:\Dependencies\Include;D:\Dependencies\imgui-docking;D:\Dependencies\imgui-docking\backends;D:\Dependencies\stb;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>..\deps\include;..\deps\imgui;..\deps\imgui\backends;..\deps\stb;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
        <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalLibraryDirectories>D:\Dependencies\Lib\$(Configuration)\$(Platform);%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalLibraryDirectories>..\deps\lib\$(Configuration)\$(Platform);%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <AdditionalDependencies>glew32s.lib;glfw3.lib;opengl32.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
@@ -98,13 +98,13 @@
       <SDLCheck>true</SDLCheck>
       <PreprocessorDefinitions>WIN32;NDEBUG;_CONSOLE;GLEW_STATIC;IMGUI_IMPL_OPENGL_LOADER_GLFW;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
-      <AdditionalIncludeDirectories>D:\Dependencies\Include;D:\Dependencies\imgui-docking;D:\Dependencies\imgui-docking\backends;D:\Dependencies\stb;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>..\deps\include;..\deps\imgui;..\deps\imgui\backends;..\deps\stb;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
        <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalLibraryDirectories>D:\Dependencies\Lib\$(Configuration)\$(Platform);%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalLibraryDirectories>..\deps\lib\$(Configuration)\$(Platform);%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <AdditionalDependencies>glew32s.lib;glfw3.lib;opengl32.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
@@ -114,13 +114,13 @@
       <SDLCheck>true</SDLCheck>
       <PreprocessorDefinitions>_DEBUG;_CONSOLE;GLEW_STATIC;IMGUI_IMPL_OPENGL_LOADER_GLFW;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
-      <AdditionalIncludeDirectories>D:\Dependencies\Include;D:\Dependencies\imgui-docking;D:\Dependencies\imgui-docking\backends;D:\Dependencies\stb;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>..\deps\include;..\deps\imgui;..\deps\imgui\backends;..\deps\stb;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
        <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalLibraryDirectories>D:\Dependencies\Lib\$(Configuration)\$(Platform);%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalLibraryDirectories>..\deps\lib\$(Configuration)\$(Platform);%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <AdditionalDependencies>glew32s.lib;glfw3.lib;opengl32.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
@@ -132,25 +132,25 @@
       <SDLCheck>true</SDLCheck>
       <PreprocessorDefinitions>NDEBUG;_CONSOLE;GLEW_STATIC;IMGUI_IMPL_OPENGL_LOADER_GLFW;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
-      <AdditionalIncludeDirectories>D:\Dependencies\Include;D:\Dependencies\imgui-docking;D:\Dependencies\imgui-docking\backends;D:\Dependencies\stb;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>..\deps\include;..\deps\imgui;..\deps\imgui\backends;..\deps\stb;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
        <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalLibraryDirectories>D:\Dependencies\Lib\$(Configuration)\$(Platform);%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalLibraryDirectories>..\deps\lib\$(Configuration)\$(Platform);%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <AdditionalDependencies>glew32s.lib;glfw3.lib;opengl32.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
 
   <ItemGroup>
     <ClCompile Include="main.cpp" />
-    <ClCompile Include="D:\Dependencies\imgui-docking\imgui.cpp" />
-    <ClCompile Include="D:\Dependencies\imgui-docking\imgui_draw.cpp" />
-    <ClCompile Include="D:\Dependencies\imgui-docking\imgui_tables.cpp" />
-    <ClCompile Include="D:\Dependencies\imgui-docking\imgui_widgets.cpp" />
-    <ClCompile Include="D:\Dependencies\imgui-docking\backends\imgui_impl_glfw.cpp" />
-    <ClCompile Include="D:\Dependencies\imgui-docking\backends\imgui_impl_opengl3.cpp" />
+    <ClCompile Include="..\deps\imgui\imgui.cpp" />
+    <ClCompile Include="..\deps\imgui\imgui_draw.cpp" />
+    <ClCompile Include="..\deps\imgui\imgui_tables.cpp" />
+    <ClCompile Include="..\deps\imgui\imgui_widgets.cpp" />
+    <ClCompile Include="..\deps\imgui\backends\imgui_impl_glfw.cpp" />
+    <ClCompile Include="..\deps\imgui\backends\imgui_impl_opengl3.cpp" />
     <ClInclude Include="Camera.h" />
     <ClInclude Include="ObjLoader.h" />
     <ClInclude Include="Shader.h" />

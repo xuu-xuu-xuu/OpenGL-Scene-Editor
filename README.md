@@ -24,12 +24,11 @@
 
 ## 构建
 
-需要把以下依赖放到 `D:\Dependencies\`：
+所有第三方依赖（GLFW/GLEW/GLM/ImGui/stb_image 及静态库）都已内嵌在 `deps\` 目录，
+工程内全部使用相对路径，下载后无需额外安装任何库。
 
-- `Include\GLFW`、`Include\GL`(glew)、`Include\glm`
-- `imgui-docking\`（imgui 源码）
-- `stb\stb_image.h`
-- 工程文件：`OpenGL_Learning.sln`（VS2022）
+1. 用 Visual Studio 2022 打开 `OpenGL_Learning.sln`
+2. 直接选择 Debug/Release × x64/Win32 生成即可
 
 ## 操作
 
