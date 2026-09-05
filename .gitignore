@@ -4,9 +4,9 @@
 *.suo
 
 # 缂栬瘧杈撳嚭锛圖ebug/Release/x64 绛夛級
-x64/
-Debug/
-Release/
+/x64/
+/Debug/
+/Release/
 *.pdb
 *.ilk
 *.exp
