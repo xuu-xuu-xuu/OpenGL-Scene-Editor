@@ -1,9 +1,9 @@
-# Visual Studio
+﻿# Visual Studio
 .vs/
 *.user
 *.suo
 
-# 编译输出（Debug/Release/x64 等）
+# 缂栬瘧杈撳嚭锛圖ebug/Release/x64 绛夛級
 x64/
 Debug/
 Release/
@@ -11,8 +11,6 @@ Release/
 *.ilk
 *.exp
 
-# ImGui 布局缓存（每次启动会重新生成）
-imgui.ini
+# ImGui 甯冨眬缂撳瓨锛堟瘡娆″惎鍔ㄤ細閲嶆柊鐢熸垚锛?imgui.ini
 
-# 日志等
-*.log
+# 鏃ュ織绛?*.log
