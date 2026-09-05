@@ -3,14 +3,23 @@
 *.user
 *.suo
 
-# 缂栬瘧杈撳嚭锛圖ebug/Release/x64 绛夛級
-/x64/
-/Debug/
-/Release/
+# 编译产物（项目目录内，不影响 deps/lib）
+OpenGL_Learning/Debug/
+OpenGL_Learning/Release/
+OpenGL_Learning/x64/
 *.pdb
 *.ilk
 *.exp
+*.obj
+*.tlog
+*.recipe
+*.log
+*.idb
+*.ipdb
+*.iobj
 
-# ImGui 甯冨眬缂撳瓨锛堟瘡娆″惎鍔ㄤ細閲嶆柊鐢熸垚锛?imgui.ini
+# ImGui 布局缓存
+imgui.ini
 
-# 鏃ュ織绛?*.log
+# 发布打包目录
+release/
