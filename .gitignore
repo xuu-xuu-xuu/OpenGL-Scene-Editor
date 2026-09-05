@@ -23,3 +23,7 @@ imgui.ini
 
 # 发布打包目录
 release/
+# 仓库根级遗留产物
+/Debug/
+/Release/
+/x64/
