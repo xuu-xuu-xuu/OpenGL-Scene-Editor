@@ -22,6 +22,23 @@
   - 屏幕空间黑色描边（深度 + 法线，带距离淡出）
   - 后期：饱和度 / 暖调 / 伪 AO / 泛光 / 颗粒 / 暗角
 
+
+## 代码结构（模块化）
+
+| 模块 | 文件 | 职责 |
+|---|---|---|
+| 入口/主循环 | `Application.cpp/h` | 窗口、输入、帧循环 |
+| 平台层 | `Platform.cpp/h` | GLFW/系统交互、IME、鼠标捕获 |
+| 渲染器 | `Renderer.cpp/h` | FBO、视口渲染、描边/后期管线 |
+| 场景 | `Scene.cpp/h` | 模型实例、光源、选择状态 |
+| 编辑器 UI | `EditorUI.cpp/h` | ImGui 工具栏/层级/属性面板 |
+| 视口 | `Viewport.cpp/h` | 16:9 letterbox 与视口矩形 |
+| 拾取/拖拽 | `Picking.cpp/h` | 射线拾取、Gizmo 手柄 |
+| 模型导入 | `ModelImporter.cpp/h` | OBJ/MTL/贴图、子网格 |
+| 网格 | `Mesh.cpp/h` | 几何生成与缓冲 |
+| 纹理 | `Texture.cpp/h` | stb_image 加载 |
+| 着色器 | `Shaders.h` | GLSL 源码集中定义 |
+| 设置 | `Settings.h` | 全局参数/风格化参数 |
 ## 构建
 
 所有第三方依赖（GLFW/GLEW/GLM/ImGui/stb_image 及静态库）都已内嵌在 `deps\` 目录，
